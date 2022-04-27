@@ -7,9 +7,18 @@
 #include <sys/socket.h>
 
 #include "utils.h"
+#include "chunk-record.h"
+#include "message.h"
 
-int send_from_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* source) {
+int send_from_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* source, long int length) {
     int result;
+    struct chunk_info* chunk_header;
+
+    // find file length and update the header
+    chunk_header = (struct chunk_info*) buffer + sizeof(struct message_header);
+    fseek(source, 0, SEEK_END);
+    chunk_header->length = htonl(ftell(source));
+    fseek(source, 0, SEEK_SET);
 
     // read from disk and send
     result = fread(buffer + *buffer_tail, sizeof(char), buffer_max - *buffer_tail, source);
@@ -18,6 +27,9 @@ int send_from_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd
     if (result == FAIL) {
         return FAIL;
     }
+
+    memset(buffer, 0, buffer_max);
+    *buffer_tail = 0;
 
     result = fread(buffer, sizeof(char), buffer_max, source);
     while (result != 0) {
@@ -32,18 +44,40 @@ int send_from_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd
     return SUCCESS;
 }
 
-int receive_to_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* destination) {
+int receive_to_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* destination ,long int length) {
     int result;
+    long int length_done = 0;
+
     // TODO : not checking result after writing to disk might be trouble
     result = fwrite(buffer + sizeof(struct message_header) + sizeof(struct chunk_info), sizeof(char),
             *buffer_tail - sizeof(struct message_header) - sizeof(struct chunk_info), destination);
+    length_done += (long int)result;
 
-    result = recv(socket_fd, buffer, buffer_max, 0);
-    while (result != 0) {
+    memset(buffer, 0, buffer_max);
+    *buffer_tail = 0;
+
+    while (length_done < length) {
+        result = recv(socket_fd, buffer, buffer_max, 0);
         *buffer_tail = result;
         result = fwrite(buffer, sizeof(char ), *buffer_tail, destination);
-        result = recv(socket_fd, buffer, buffer_max, 0);
+        length_done += result;
     }
+    return SUCCESS;
+}
+
+int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max,
+                             int socket_fd, void* to_copy, int copy_length) {
+    int result;
+    if (*buffer_tail + copy_length > buffer_max) {  // buffer full, time to send it, clear buffer, and resume
+        result = try_send_in_chunks(socket_fd, buffer, *buffer_tail);
+        if (result == FAIL) {
+            return FAIL;
+        }
+        memset(buffer, 0, buffer_max);
+        *buffer_tail = 0;
+    }
+    memcpy(buffer + *buffer_tail, to_copy, copy_length);
+    *buffer_tail += copy_length;
     return SUCCESS;
 }
 

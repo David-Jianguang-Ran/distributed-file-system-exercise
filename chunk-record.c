@@ -12,6 +12,7 @@ struct chunk_info chunk_info_create() {
     created.server_num = -1;
     created.timestamp = -1;
     created.chunk_num = -1;
+    created.length = -1;
     return created;
 }
 
@@ -19,13 +20,14 @@ void chunk_info_to_network(struct chunk_info* target) {
     target->server_num = htons(target->server_num);
     target->timestamp = htonl(target->timestamp);
     target->chunk_num = htons(target->chunk_num);
+    target->length = htonl(target->length);
 }
 
 void chunk_info_from_network(struct chunk_info* target) {
     target->server_num = ntohs(target->server_num);
     target->timestamp = ntohl(target->timestamp);
     target->chunk_num = ntohs(target->chunk_num);
-    target->length = ntohs(target->length);
+    target->length = ntohl(target->length);
 }
 
 int chunk_set_free(struct chunk_set* ptr_to_set) {
@@ -35,7 +37,6 @@ int chunk_set_free(struct chunk_set* ptr_to_set) {
     HASH_ITER(hh, ptr_to_set, current, temp) {
         free(current);
     }
-    *ptr_to_set = NULL;
     return SUCCESS;
 }
 
