@@ -4,3 +4,6 @@ directory-structure:
 	test -d "./executables/dfs2" || mkdir "./executables/dfs2"
 	test -d "./executables/dfs3" || mkdir "./executables/dfs3"
 	test -d "./executables/dfs4" || mkdir "./executables/dfs4"
+
+tests: directory-structure
+	gcc -Wall -o ./executables/name-table-test name-table-test.c name-table.c

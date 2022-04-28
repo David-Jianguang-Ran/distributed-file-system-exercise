@@ -13,8 +13,13 @@ struct table_element {
     UT_hash_handle hh;
 };
 
+struct name_table {
+    struct table_element* head;
+};
+
 // adding duplicate names have no effect and is perfectly safe
-int name_table_add(struct table_element* table, char* name_string);
-int name_table_free(struct table_element* table);
+struct name_table* name_table_create();
+int name_table_free(struct name_table* table);
+int name_table_add(struct name_table* table, char* name_string);
 
 #endif //NS_PA_4_NAME_TABLE_H

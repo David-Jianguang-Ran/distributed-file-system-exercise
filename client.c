@@ -13,19 +13,26 @@
 
 // TODO : rework keep connection, centralize control
 
-struct addrinfo* SERVER_ADDRESS[SERVERS];
-
 int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);
 int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);
 int list_all_files(int sockets_to_server[SERVERS]);
+
 // query one server for all filenames stored, add then to name_table
-int query_file_names(int server_socket, struct table_element* name_table);
+int query_file_names(int server_socket, struct name_table* name_table);
 // query all servers and return pointer to the most recent valid set of chunks
 struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERVERS], int keep_connection);
 // query one server for all chunks of a named file, saves to chunk_table
-int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_set* chunk_table);
+int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_table* chunk_table);
 
 long int make_timestamp();
+
+int main(int argc, char* argv) {
+    // connect to server
+
+    //
+
+    return 0;
+}
 
 int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection) {
     int result;
@@ -100,20 +107,23 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     int has_failed;
     int i;
     int result;
+    long int timestamp;
     struct chunk_info chunks_to_send[SERVERS * 2];
     FILE* chunks[SERVERS];
 
     char header_buffer[HEADER_BUFFER + 1] = '\0';
     struct message_header* header;
 
+    timestamp = make_timestamp();
     // make chunk - server map
 
-    // make chunks
+    // partition file into chunks
 
     // send each partition
     for (i = 0; i < SERVERS * 2; i++) {
         // some servers may be unavailable
         if (sockets_to_server[chunks_to_send[i].server_num] == -1) {
+            // fail but other chunks should still be sent
             has_failed += 1;
             continue;
         }
@@ -123,7 +133,6 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
                                 sockets_to_server[chunks_to_send[i].server_num],
                                 chunks[chunks_to_send[i].chunk_num]);
         if (result == FAIL) {
-            // fail but other chunks should still be sent
             has_failed += 1;
         }
     }
@@ -134,18 +143,19 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 }
 
 int list_all_files(int sockets_to_server[SERVERS]) {
-    struct table_element* name_table = NULL;
+    struct name_table* name_table;
     struct table_element* current_name;
     struct chunk_set* valid_set;
     int i;
 
+    name_table = name_table_create();
     // query each server for file names,
     // duplicate names will have no effect
     for (i = 0; i < SERVERS; i++) {
         query_file_names(sockets_to_server[i], name_table);
     }
     // query chunk for each name, names without a valid chunk_set means incomplete
-    for (current_name = name_table; current_name != NULL; current_name = current_name->hh.next) {
+    for (current_name = name_table->head; current_name != NULL; current_name = current_name->hh.next) {
         valid_set = get_valid_chunk_set(current_name->file_name, sockets_to_server, 1);
         if (valid_set == NULL) {
             printf("%s [incomplete]\n", current_name->file_name);
@@ -162,7 +172,7 @@ int list_all_files(int sockets_to_server[SERVERS]) {
 // because most names will not be close to max name length,
 // transmitting structs will mean a lot of empty / garbage byte being sent
 // I just can't bring myself to do such a wasteful thing, even if it makes my life easier
-int query_file_names(int server_socket, struct table_element* name_table) {
+int query_file_names(int server_socket, struct name_table* name_table) {
     char com_buffer[COM_BUFFER_SIZE + 1] ="\0";
     int com_buffer_tail = 0;
     struct message_header* header;
@@ -188,17 +198,18 @@ int query_file_names(int server_socket, struct table_element* name_table) {
     if (header->type != name_list) {
         return FAIL;
     }
-
+    // TODO : stub
 
 }
 
 struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERVERS], int keep_connection) {
-    struct chunk_set* chunk_table = NULL;
+    struct chunk_table* table;
     struct chunk_set* found_set = NULL;
     struct chunk_set* return_set = NULL;
     int i;
     int result;
 
+    table = chunk_table_create();
     // query each server for file chunks
     for (i = 0; i < SERVERS; i++) {
         if (sockets_to_server[i] != -1) {
@@ -211,11 +222,11 @@ struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERV
         return_set = malloc(sizeof(chunk_set));
         *return_set = *found_set;
     }
-    chunk_set_free(chunk_table);
+    chunk_table_free();
     return return_set;
 }
 
-int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_set* chunk_table) {
+int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_table* chunk_table) {
     char com_buffer[sizeof(struct message_header) + sizeof(struct chunk_info) + 1] = "\0";
     int com_buffer_tail = 0;
     struct message_header* header;
@@ -242,9 +253,11 @@ int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filen
     }
     found_chunk = (struct chunk_info)com_buffer + sizeof(struct message_header);
     chunk_info_from_network(found_chunk);
+
     while (found_chunk->chunk_num != -1) {
         found_chunk->server_num = server_num;
-        chunk_set_add(chunk_table, found_chunk);
+        chunk_table_add(chunk_table, found_chunk);
+
         result = recv(sockets_to_server[server_num], com_buffer + sizeof (struct message_header), sizeof(struct chunk_info), 0);
         if (result < sizeof(struct chunk_info)) {
             return FAIL;

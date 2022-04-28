@@ -5,8 +5,6 @@
 #ifndef NS_PA_4_CHUNK_RECORD_H
 #define NS_PA_4_CHUNK_RECORD_H
 
-#include <time.h>
-
 #include "uthash.h"
 #include "constants.h"
 
@@ -26,17 +24,22 @@ struct chunk_set {
     UT_hash_handle hh;
 };
 
+struct chunk_table {
+    // char file_name[MAX_FILENAME_LENGTH];
+    struct chunk_set* head;
+};
+
 struct chunk_info chunk_info_create();
 // the following functions convert to and from network byte order
 void chunk_info_to_network(struct chunk_info* target);
 void chunk_info_from_network(struct chunk_info* target);
 
-int chunk_set_free(struct chunk_set* ptr_to_set);
-
+struct chunk_table* chunk_table_create();
+void chunk_table_free(struct chunk_table* table);
 // copies the chunk info into the corresponding set based on timestamp and chunk_num
 // will overwrite previous chunk_info with the same timestamp and chunk_num
-int chunk_set_add(struct chunk_set* ptr_to_set, struct chunk_info* to_add);
-struct chunk_set* find_latest_valid_set(struct chunk_set* ptr_to_set);
+int chunk_table_add(struct chunk_table* table, struct chunk_info* to_add);
+struct chunk_set* find_latest_valid_set(struct chunk_table* table);
 
 // private functions below
 // sort chunk_set based on timestamp, highest timestamp comes first
