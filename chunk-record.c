@@ -21,14 +21,14 @@ void chunk_info_to_network(struct chunk_info* target) {
     target->server_num = htons(target->server_num);
     target->timestamp = htonl(target->timestamp);
     target->chunk_num = htons(target->chunk_num);
-    target->length = htonl(target->length);
+    target->length = htons(target->length);
 }
 
 void chunk_info_from_network(struct chunk_info* target) {
     target->server_num = ntohs(target->server_num);
     target->timestamp = ntohl(target->timestamp);
     target->chunk_num = ntohs(target->chunk_num);
-    target->length = ntohl(target->length);
+    target->length = ntohs(target->length);
 }
 
 struct chunk_table* chunk_table_create() {

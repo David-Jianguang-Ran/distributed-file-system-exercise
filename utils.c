@@ -65,6 +65,19 @@ int receive_to_file(char* buffer, int* buffer_tail, int buffer_max, int socket_f
     return SUCCESS;
 }
 
+int hash_then_get_remainder(char* filename) {
+    FILE* hashed;
+    char command_buffer[FILENAME_MAX * 2];
+    char result_buffer[33];
+    long long int result_numeric;
+
+    sprintf(command_buffer, "echo '%s' | md5sum\n", filename);
+    hashed = popen(command_buffer, "r");
+    fread(result_buffer, sizeof(char), 32, hashed);
+    result_numeric = *((long long int*)result_buffer);
+    return (int) result_numeric % SERVERS;
+}
+
 int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max,
                              int socket_fd, void* to_copy, int copy_length) {
     int result;

@@ -148,6 +148,7 @@ int send_chunk(int client_socket) {
         try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
         return FAIL;
     }
+    chunk_header->length = get_file_length(chunk_file);
 
     result = send_file_data(header, chunk_header, client_socket, chunk_file);
     fclose(chunk_file);

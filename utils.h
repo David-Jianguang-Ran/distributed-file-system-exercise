@@ -22,6 +22,17 @@ int receive_to_file(char* buffer, int* buffer_tail, int buffer_max, int socket_f
 int send_file_data(struct message_header* header, struct chunk_info* info, int socket_fd, FILE* source);
 int receive_file_data(int socket_fd, FILE* source, long int length);
 
+// original may not be divisible by SERVERS,
+// the last chunk may not be exactly the same length
+int calculate_chunk_length(FILE* original);
+// this function is so jank, I'm actually ashamed of it.
+int hash_then_get_remainder(char* filename);
+// the current position of the stream will not change after this function
+int get_file_length(FILE* target);
+// will start copying from the current position for both files
+// if source runs out before bytes that's ok
+int copy_bytes_to_file(FILE* source, FILE* destination, int bytes);
+
 // try to copy item into buffer, if buffer full then send first then copy
 int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, void* to_copy, int copy_length);
 

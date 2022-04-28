@@ -107,17 +107,38 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     int has_failed;
     int i;
     int result;
+    int map_offset;
+    int chunk_offset;
     long int timestamp;
+    char file_name_buffer[FILENAME_MAX + 64];
     struct chunk_info chunks_to_send[SERVERS * 2];
+    FILE* original;
     FILE* chunks[SERVERS];
 
     char header_buffer[HEADER_BUFFER + 1] = '\0';
     struct message_header* header;
 
     timestamp = make_timestamp();
-    // make chunk - server map
+    map_offset = hash_then_get_remainder(filename);
+    chunk_offset = calculate_chunk_length(original) + 1;
 
     // partition file into chunks
+    for (i = 0; i < SERVERS; i++) {
+        sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
+        chunks[i] = fopen(file_name_buffer,"w+");
+        copy_bytes_to_file(original, chunks[i], chunk_offset);
+    }
+
+    // make chunk - server map
+    for (i = 0; i < SERVERS; i++) {
+        chunks_to_send[i].server_num = i;
+        chunks_to_send[i].chunk_num = (i - map_offset) % SERVERS;
+        chunks_to_send[i].timestamp = timestamp;
+
+        chunks_to_send[i + SERVERS].server_num = i;
+        chunks_to_send[i + SERVERS].chunk_num = (i - map_offset + 1) % SERVERS;
+        chunks_to_send[i + SERVERS].timestamp = timestamp;
+    }
 
     // send each partition
     for (i = 0; i < SERVERS * 2; i++) {
@@ -127,7 +148,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
             has_failed += 1;
             continue;
         }
-
+        chunks_to_send[i].length = get_file_length(chunks[chunks_to_send[i].chunk_num]);
         fseek(chunks[chunks_to_send[i].chunk_num], 0, SEEK_SET);
         result = send_file_data(header, chunks_to_send[i],
                                 sockets_to_server[chunks_to_send[i].server_num],
@@ -139,6 +160,14 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     if (has_failed) {
         printf("%s put failed\n", filename);
     }
+
+    // clean up temporary file
+    for (i = 0; i < SERVERS; i++) {
+        fclose(chunks[i]);
+        sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
+        remove(file_name_buffer);
+    }
+
     return SUCCESS;
 }
 
@@ -173,13 +202,14 @@ int list_all_files(int sockets_to_server[SERVERS]) {
 // transmitting structs will mean a lot of empty / garbage byte being sent
 // I just can't bring myself to do such a wasteful thing, even if it makes my life easier
 int query_file_names(int server_socket, struct name_table* name_table) {
-    char com_buffer[COM_BUFFER_SIZE + 1] ="\0";
+    char com_buffer[COM_BUFFER_SIZE + 1];
     int com_buffer_tail = 0;
     struct message_header* header;
     int result;
     char* name_start;
     char* name_end;
 
+    memset(com_buffer, '\0', COM_BUFFER_SIZE + 1);
     // send query to server
     header = (struct message_header*) com_buffer;
     message_header_set(header, filename, name_query, 1);
@@ -198,8 +228,33 @@ int query_file_names(int server_socket, struct name_table* name_table) {
     if (header->type != name_list) {
         return FAIL;
     }
-    // TODO : stub
 
+    // read name strings and add to name table
+    name_end = com_buffer + sizeof(struct message_header);
+    while (1) {
+        name_start = name_end + 1;
+        name_end = strchr(name_start, '\0');
+        if (name_end == com_buffer + COM_BUFFER_SIZE + 1) { // incomplete name, move to start of buffer and continue reading
+            com_buffer_tail = name_end - name_start - 1;
+            memmove(com_buffer, name_start, name_end - name_start - 1);
+            result = recv(server_socket, com_buffer + com_buffer_tail, COM_BUFFER_SIZE - com_buffer_tail, 0);
+            if (result == 0) {
+                return SUCCESS;  // server closed socket, but we might have some useful data so let's just limp along
+            }
+            com_buffer_tail += result;
+            name_start = com_buffer;
+            name_end = strchr(name_start, '\0');
+            if (name_end == com_buffer + COM_BUFFER_SIZE + 1) {
+                return FAIL;  // names should never be longer than buffer something has gone terribly wrong
+            } else {
+                name_table_add(name_table,name_start);
+            }
+        } else if (name_end == name_start) {  // zero length string, the message is finished
+            return SUCCESS;
+        } else {
+            name_table_add(name_table, name_start);
+        }
+    }
 }
 
 struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERVERS], int keep_connection) {

@@ -12,7 +12,7 @@ struct chunk_info {
     int server_num;
     long int timestamp;
     int chunk_num;
-    long int length;
+    int length;  // this field may not be populated
 };
 
 // a set of 4 valid chunks belonging to the same file and same version

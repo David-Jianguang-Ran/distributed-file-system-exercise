@@ -7,3 +7,6 @@ directory-structure:
 
 tests: directory-structure
 	gcc -Wall -o ./executables/name-table-test name-table-test.c name-table.c
+
+experiments: directory-structure
+	gcc -Wall -o ./executables/hash-modulo-experiment hash-modulo-experiment.c
