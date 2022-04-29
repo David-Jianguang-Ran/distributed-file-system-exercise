@@ -3,6 +3,7 @@
 //
 
 #include <pthread.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -11,13 +12,20 @@
 
 #include "constants.h"
 #include "thread-safe-job-stack.h"
+#include "thread-safe-file.h"
 #include "chunk-record.h"
 #include "message.h"
 #include "utils.h"
 
 char* STORAGE_DIR;
+safe_file_t* STD_OUT;
+int SHOULD_SHUTDOWN;
 
-int worker_main(job_stack_t* job_stack);
+void shutdown_signal_handler(int sig_num) {
+    SHOULD_SHUTDOWN = 1;
+}
+
+void* worker_main(void* job_stack);
 
 // TODO : implement keep alive in server handlers
 int handle_name_query(int client_socket);
@@ -28,7 +36,136 @@ int receive_chunk(int client_socket);
 int send_chunk(int client_socket);
 
 int main(int argc, char* argv[]) {
+    int result;
+    int i;
+
+    if (argc != 3) {
+        printf("usage: %s <storage-dir> <port>\n", argv[0]);
+        return 1;
+    }
+
+    // custom shutdown signal handling
+    struct sigaction new_action;
+
+    memset(&new_action, 0, sizeof(struct sigaction));
+    new_action.sa_handler = shutdown_signal_handler;
+    sigaction(SIGTERM, &new_action, NULL);
+    sigaction(SIGINT, &new_action, NULL);
+
+    // create main listener socket
+    int listener_socket_fd;
+    int connected_fd;
+    struct sockaddr_in server_sock;
+    socklen_t server_sock_len;
+
+    listener_socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener_socket_fd == -1) {
+        printf("error: unable to create socket\n");
+        return 1;
+    }
+    server_sock.sin_family = AF_INET;
+    server_sock.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_sock.sin_port = htons(atoi(argv[2]));
+    server_sock_len = sizeof(struct sockaddr_in);
+    result = bind(listener_socket_fd, (struct sockaddr *) &server_sock, server_sock_len);
+    if (result != SUCCESS) {
+        printf("error: unable to bind to port %d", atoi(argv[2]));
+        return 1;
+    }
+
+    // spawn workers
+    pthread_t workers[SERVER_WORKERS];
+    job_stack_t* job_stack;
+
+    STD_OUT = safe_init(stdout);
+    job_stack = job_stack_construct(SERVER_JOB_STACK_SIZE, SERVER_WORKERS);
+    STORAGE_DIR = argv[1];
+
+    for (i = 0; i < SERVER_WORKERS; i++) {
+        pthread_create(&workers[i], NULL, worker_main, job_stack);
+    }
+
+    // listen for incoming connection and push onto job stack
+    SHOULD_SHUTDOWN = 0;
+    result = listen(listener_socket_fd, SERVER_JOB_STACK_SIZE);
+    if (result == -1) {
+        SHOULD_SHUTDOWN = 1;
+    } else {
+        safe_write(STD_OUT, "server listening for connection\n");
+    }
+    while (!SHOULD_SHUTDOWN) {
+        connected_fd = accept(listener_socket_fd, NULL, NULL);
+        result = FAIL;
+        while (result == FAIL) {  // job stack push can fail, but the client socket must still be serviced
+            result = job_stack_push(job_stack, connected_fd);
+        }
+    }
+
+    // shutdown routine
+    safe_write(STD_OUT, "shutdown signal received, waiting for jobs to finish\n");
+    job_stack_signal_finish(job_stack);
+    for(i = 0; i < SERVER_WORKERS; i++) {
+        pthread_join(workers[i], NULL);
+    }
+
+    close(listener_socket_fd);
+    job_stack_destruct(job_stack);
+    safe_close(STD_OUT);
     return 0;
+}
+
+void* worker_main(void* job_stack_ptr) {
+    job_stack_t* job_stack = (job_stack_t*) job_stack_ptr;
+    int job_result = FAIL;
+    int result;
+    int client_socket;
+    char header_buffer[HEADER_BUFFER + 1];
+    struct message_header* header = (struct message_header*) header_buffer;
+    struct chunk_info* chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
+
+    while (job_result != FINISHED) {
+        job_result = job_stack_pop(job_stack, &client_socket);
+        if (job_result == SUCCESS) {
+            // receive just the headers
+            memset(header_buffer, 0, HEADER_BUFFER);
+            result = recv(client_socket, header_buffer, HEADER_BUFFER, MSG_PEEK);
+            if (result < sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
+                job_stack_push_back(job_stack, client_socket);
+                continue;
+            }
+
+            // switch to work functions based on header
+            message_header_from_network(header);
+            if (header->type == name_query) {
+                result = handle_name_query(client_socket);
+            } else if (header->type == chunk_query) {
+                result = handle_chunk_query(client_socket);
+            } else if ((header->type == chunk_list && result < HEADER_BUFFER)
+                    || (header->type == chunk_data && result < HEADER_BUFFER)) {  // incomplete headers, read you later
+                job_stack_push_back(job_stack, client_socket);
+                continue;
+            } else if (header->type == chunk_list) {
+                result = send_chunk(client_socket);
+            } else if (header->type == chunk_data) {
+                result = receive_chunk(client_socket);
+            } else {
+                // ?? how did we get here?
+                safe_write(STD_OUT, "invalid header received on socket:%d closing connection\n", client_socket);
+                close(client_socket);
+            }
+
+            // after service
+            if (result == FAIL) {
+                safe_write(STD_OUT, "failed request on socket:%d closing connection\n", client_socket);
+                close(client_socket);
+            } else if (header->keep_alive) {
+                job_stack_push_back(job_stack, client_socket);
+                continue;
+            } else {
+                close(client_socket);
+            }
+        }
+    }
 }
 
 int handle_name_query(int client_socket) {
