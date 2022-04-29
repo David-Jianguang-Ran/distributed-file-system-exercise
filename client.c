@@ -24,7 +24,6 @@ struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERV
 // query one server for all chunks of a named file, saves to chunk_table
 int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_table* chunk_table);
 
-long int make_timestamp();
 
 int main(int argc, char* argv) {
     // connect to server

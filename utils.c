@@ -5,64 +5,76 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #include "utils.h"
 #include "chunk-record.h"
 #include "message.h"
 
-int send_from_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* source, long int length) {
+
+int send_file_data(struct message_header* header_arg, struct chunk_info* info_arg, int socket_fd, FILE* source) {
+    char file_buffer[COM_BUFFER_SIZE + 1];
+    int file_buffer_tail = 0;
+    char com_buffer[COM_BUFFER_SIZE + 1];
+    int com_buffer_tail = 0;
+    struct message_header* header;
+    struct chunk_info* info;
     int result;
-    struct chunk_info* chunk_header;
 
-    // find file length and update the header
-    chunk_header = (struct chunk_info*) buffer + sizeof(struct message_header);
-    fseek(source, 0, SEEK_END);
-    chunk_header->length = htonl(ftell(source));
-    fseek(source, 0, SEEK_SET);
+    // populate header
+    header = (struct message_header*) com_buffer;
+    info = (struct chunk_info*) com_buffer + sizeof(struct message_header);
+    com_buffer_tail = sizeof(struct message_header) + sizeof(struct chunk_info);
+    *header = *header_arg;
+    header->keep_alive = htons(header->keep_alive);
+    *info = *info_arg;
+    chunk_info_to_network(info);
 
-    // read from disk and send
-    result = fread(buffer + *buffer_tail, sizeof(char), buffer_max - *buffer_tail, source);
-    buffer_tail += result;
-    result = try_send_in_chunks(client_socket, buffer, *buffer_tail);
-    if (result == FAIL) {
-        return FAIL;
-    }
-
-    memset(buffer, 0, buffer_max);
-    *buffer_tail = 0;
-
-    result = fread(buffer, sizeof(char), buffer_max, source);
-    while (result != 0) {
-        *buffer_tail = result;
-        result = try_send_in_chunks(client_socket, buffer, buffer_tail);
+    // read some data from file, send when com buffer is filled
+    // do until source file is exhausted
+    file_buffer_tail = fread(file_buffer, sizeof(char), COM_BUFFER_SIZE, source);
+    while (file_buffer_tail != 0) {
+        result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
+                                          socket_fd,file_buffer, file_buffer_tail);
         if (result == FAIL) {
             return FAIL;
         }
-        result = fread(buffer, sizeof(char), buffer_max, source);
+        file_buffer_tail = fread(file_buffer, sizeof(char), COM_BUFFER_SIZE, source);
     }
+    result = try_send_in_chunks(socket_fd, com_buffer, com_buffer_tail);
+    if (result == FAIL) {
+        return FAIL;
+    } else {
+        return SUCCESS;
+    }
+}
 
+int receive_file_data(int socket_fd, FILE* destination, long int length) {
+    char com_buffer[COM_BUFFER_SIZE + 1];
+    int com_buffer_tail = 0;
+    int result;
+    int bytes_done = 0;
+
+    while (bytes_done < length) {
+        result = recv(socket_fd, com_buffer, COM_BUFFER_SIZE, 0);
+        if (result == 0) {
+            return FAIL;
+        } else {
+            com_buffer_tail = result;
+        }
+        bytes_done += fwrite(com_buffer, sizeof(char ), com_buffer_tail, source);
+    }
     return SUCCESS;
 }
 
-int receive_to_file(char* buffer, int* buffer_tail, int buffer_max, int socket_fd, FILE* destination ,long int length) {
-    int result;
-    long int length_done = 0;
+long int make_timestamp() {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    return  (long int) now.tv_sec * 1000 + (long int) now.tv_usec / 1000;
+}
 
-    // TODO : not checking result after writing to disk might be trouble
-    result = fwrite(buffer + sizeof(struct message_header) + sizeof(struct chunk_info), sizeof(char),
-            *buffer_tail - sizeof(struct message_header) - sizeof(struct chunk_info), destination);
-    length_done += (long int)result;
-
-    memset(buffer, 0, buffer_max);
-    *buffer_tail = 0;
-
-    while (length_done < length) {
-        result = recv(socket_fd, buffer, buffer_max, 0);
-        *buffer_tail = result;
-        result = fwrite(buffer, sizeof(char ), *buffer_tail, destination);
-        length_done += result;
-    }
-    return SUCCESS;
+int calculate_chunk_length(FILE* original) {
+    return get_file_length(original) / SERVERS;
 }
 
 int hash_then_get_remainder(char* filename) {
@@ -76,6 +88,37 @@ int hash_then_get_remainder(char* filename) {
     fread(result_buffer, sizeof(char), 32, hashed);
     result_numeric = *((long long int*)result_buffer);
     return (int) result_numeric % SERVERS;
+}
+
+int get_file_length(FILE* target) {
+    int location;
+    int end;
+
+    location = ftell(target);
+    fseek(target, 0, SEEK_END);
+    end = ftell(target);
+    fseek(target, location, SEEK_SET);
+    return end;
+}
+
+// this function assumes writing to disk should generally be successful
+int copy_bytes_to_file(FILE* source, FILE* destination, int bytes) {
+    char buffer[COM_BUFFER_SIZE + 1];
+    int buffer_tail = 0;
+    int to_read = 0;
+    int copied = 0;
+
+    to_read = COM_BUFFER_SIZE < (bytes - copied) ? COM_BUFFER_SIZE : (bytes - copied);
+    while (to_read > 0) {
+        buffer_tail = fread(buffer, sizeof(char), COM_BUFFER_SIZE, source);
+        if (buffer_tail == 0) {  // running out of source early is allowed
+            return SUCCESS;
+        }
+        copied += fwrite(buffer, sizeof(char ), buffer_tail, destination);
+        to_read = COM_BUFFER_SIZE < (bytes - copied) ? COM_BUFFER_SIZE : (bytes - copied);
+    }
+    return SUCCESS;
+
 }
 
 int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max,
@@ -94,26 +137,36 @@ int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max,
     return SUCCESS;
 }
 
-// TODO : add bounds checking and failing
-void copy_into_buffer(char* target, int* target_tail, char* content) {
-    strcpy(target + *target_tail, content);  // TODO: address possible buffer overflow here
-    *target_tail += strlen(content);
+int matches_command(char* target, char* command) {
+    if (strncmp(target, command, strlen(command)) == 0) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+int matches_command_case_insensitive(char* target, char* command) {
+    if (strncasecmp(target, command, strlen(command)) == 0) {
+        return 1;
+    } else {
+        return 0;
+    }
 }
 
 int try_send_in_chunks(int socket_fd, char* buffer, int length) {
     int ret_status;
     int bytes_sent;
-    char garbage_buffer[1000];
+    char garbage_buffer[9];
 
     if (socket_fd == -1) {  // why would anyone call try_send with no receiver? code reuse
-        return SUCCESS;
+        return FAIL;
     }
 
     bytes_sent = 0;
     while (bytes_sent < length) {
 
         // first see if client is still there
-        ret_status = recv(socket_fd, garbage_buffer, 999, MSG_PEEK | MSG_DONTWAIT);
+        ret_status = recv(socket_fd, garbage_buffer, 8, MSG_PEEK | MSG_DONTWAIT);
         if (ret_status == 0) {
             return FAIL;
         }
@@ -121,8 +174,6 @@ int try_send_in_chunks(int socket_fd, char* buffer, int length) {
         // printf("sending %d bytes\n", length - bytes_sent);
         ret_status = send(socket_fd, buffer + bytes_sent, length - bytes_sent, MSG_NOSIGNAL);
         if (ret_status == -1) {
-            // not sure what will cause this,
-            // it's my understanding that if client is not there the whole process just get killed
             return FAIL;
         }
         bytes_sent += ret_status;
