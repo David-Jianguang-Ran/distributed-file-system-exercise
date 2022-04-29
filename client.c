@@ -8,10 +8,10 @@
 #include "constants.h"
 #include "name-table.h"
 #include "chunk-record.h"
-#include "message.h"
 #include "utils.h"
 
 // TODO : rework keep connection, centralize control
+size_t HEADER_BUFFER_SIZE = sizeof(struct message_header) + sizeof(struct chunk_info);
 
 int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);
 int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);

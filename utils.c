@@ -6,11 +6,31 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <arpa/inet.h>
 
 #include "utils.h"
 #include "chunk-record.h"
-#include "message.h"
 
+void message_header_init(struct message_header* target, enum message_type type, int keep_alive) {
+    target->filename[0] = '\0';
+    target->type = htons(type);
+    target->keep_alive = htons(keep_alive);
+}
+
+void message_header_set(struct message_header* target, char* filename, enum message_type type, int keep_alive) {
+    if (filename != NULL) {
+        strncpy(target->filename, filename, MAX_FILENAME_LENGTH);
+    } else {
+        target->filename[0] = '\0';
+    }
+    target->type = htons(type);
+    target->keep_alive = htons(keep_alive);
+}
+
+void message_header_from_network(struct message_header* target) {
+    target->type = ntohs(target->type);
+    target->keep_alive = ntohs(target->keep_alive);
+}
 
 int send_file_data(struct message_header* header_arg, struct chunk_info* info_arg, int socket_fd, FILE* source) {
     char file_buffer[COM_BUFFER_SIZE + 1];
@@ -62,7 +82,7 @@ int receive_file_data(int socket_fd, FILE* destination, long int length) {
         } else {
             com_buffer_tail = result;
         }
-        bytes_done += fwrite(com_buffer, sizeof(char ), com_buffer_tail, source);
+        bytes_done += fwrite(com_buffer, sizeof(char ), com_buffer_tail, destination);
     }
     return SUCCESS;
 }

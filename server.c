@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,12 +15,12 @@
 #include "thread-safe-job-stack.h"
 #include "thread-safe-file.h"
 #include "chunk-record.h"
-#include "message.h"
 #include "utils.h"
 
 char* STORAGE_DIR;
 safe_file_t* STD_OUT;
 int SHOULD_SHUTDOWN;
+size_t HEADER_BUFFER_SIZE = sizeof(struct message_header) + sizeof(struct chunk_info);
 
 void shutdown_signal_handler(int sig_num) {
     SHOULD_SHUTDOWN = 1;
@@ -27,7 +28,7 @@ void shutdown_signal_handler(int sig_num) {
 
 void* worker_main(void* job_stack);
 
-// TODO : implement keep alive in server handlers
+// TODO : decide whether to close socket when encountering error
 int handle_name_query(int client_socket);
 int handle_chunk_query(int client_socket);
 
@@ -119,7 +120,8 @@ void* worker_main(void* job_stack_ptr) {
     int job_result = FAIL;
     int result;
     int client_socket;
-    char header_buffer[HEADER_BUFFER + 1];
+    char header_buffer[HEADER_BUFFER_SIZE + 1];
+    char print_out_buffer[COM_BUFFER_SIZE + 1];
     struct message_header* header = (struct message_header*) header_buffer;
     struct chunk_info* chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
 
@@ -127,9 +129,9 @@ void* worker_main(void* job_stack_ptr) {
         job_result = job_stack_pop(job_stack, &client_socket);
         if (job_result == SUCCESS) {
             // receive just the headers
-            memset(header_buffer, 0, HEADER_BUFFER);
-            result = recv(client_socket, header_buffer, HEADER_BUFFER, MSG_PEEK);
-            if (result < sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
+            memset(header_buffer, 0, HEADER_BUFFER_SIZE);
+            result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, MSG_PEEK);
+            if (result < (int) sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
                 job_stack_push_back(job_stack, client_socket);
                 continue;
             }
@@ -140,8 +142,8 @@ void* worker_main(void* job_stack_ptr) {
                 result = handle_name_query(client_socket);
             } else if (header->type == chunk_query) {
                 result = handle_chunk_query(client_socket);
-            } else if ((header->type == chunk_list && result < HEADER_BUFFER)
-                    || (header->type == chunk_data && result < HEADER_BUFFER)) {  // incomplete headers, read you later
+            } else if ((header->type == chunk_list && result < (int) HEADER_BUFFER_SIZE)
+                    || (header->type == chunk_data && result < (int) HEADER_BUFFER_SIZE)) {  // incomplete headers, read you later
                 job_stack_push_back(job_stack, client_socket);
                 continue;
             } else if (header->type == chunk_list) {
@@ -150,13 +152,15 @@ void* worker_main(void* job_stack_ptr) {
                 result = receive_chunk(client_socket);
             } else {
                 // ?? how did we get here?
-                safe_write(STD_OUT, "invalid header received on socket:%d closing connection\n", client_socket);
+                sprintf(print_out_buffer, "invalid header received on socket:%d closing connection\n", client_socket);
+                safe_write(STD_OUT, print_out_buffer);
                 close(client_socket);
             }
 
             // after service
             if (result == FAIL) {
-                safe_write(STD_OUT, "failed request on socket:%d closing connection\n", client_socket);
+                sprintf(print_out_buffer, "failed request on socket:%d closing connection\n", client_socket);
+                safe_write(STD_OUT, print_out_buffer);
                 close(client_socket);
             } else if (header->keep_alive) {
                 job_stack_push_back(job_stack, client_socket);
@@ -172,18 +176,19 @@ int handle_name_query(int client_socket) {
     char com_buffer[COM_BUFFER_SIZE] = "\0";
     int com_buffer_tail = 0;
     int result;
-    DIR file_storage;
+    struct message_header* header = (struct message_header*)com_buffer;
+    DIR* file_storage;
     struct dirent* found_in_dir;
 
     // no need to recv from client because worker_main have peeked the message already
-    message_header_init((struct message_header*)com_buffer, name_list);
+    message_header_init(header, name_list, 1);
     com_buffer_tail += sizeof(struct message_header);
 
     file_storage = opendir(STORAGE_DIR);
     if (file_storage == NULL) {
-        message_header_init((struct message_header*)com_buffer, error);
-        copy_into_buffer(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE, "failed to open dir\n");
-        try_send_in_chunks(client_socket, com_buffer, com_buffer_tail);
+        message_header_init(header, error, 0);
+        strcpy(header->filename, "failed to open storage dir\n");
+        try_send_in_chunks(client_socket, com_buffer, sizeof(struct message_header));
         return FAIL;
     }
     found_in_dir = readdir(file_storage);
@@ -208,9 +213,9 @@ int handle_chunk_query(int client_socket) {
     int com_buffer_tail = 0;
     struct message_header* header;
     struct chunk_info current_chunk;
-    char file_name_buffer[MAX_FILENAME_LENGTH] = "\0";
+    char file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
     int result;
-    DIR file_dir;
+    DIR* file_dir;
     struct dirent* found_in_dir;
 
     result = recv(client_socket, com_buffer, COM_BUFFER_SIZE, 0);
@@ -221,9 +226,9 @@ int handle_chunk_query(int client_socket) {
     sprintf(file_name_buffer, "%s/%s", STORAGE_DIR, header->filename);
     file_dir = opendir(file_name_buffer);
     if (file_dir == NULL) {
-        message_header_init((struct message_header*)com_buffer, error);
-        copy_into_buffer(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE, "fail to open file dir\n");
-        try_send_in_chunks(client_socket, com_buffer, com_buffer_tail);
+        message_header_init(header, error, 0);
+        strcpy(header->filename, "failed to open file dir\n");
+        try_send_in_chunks(client_socket, com_buffer, sizeof(struct message_header));
         return FAIL;
     }
 
@@ -260,14 +265,14 @@ int handle_chunk_query(int client_socket) {
 }
 
 int send_chunk(int client_socket) {
-    char header_buffer[HEADER_BUFFER + 1] = "\0";
+    char header_buffer[HEADER_BUFFER_SIZE + 1];
     struct message_header* header;
     struct chunk_info* chunk_header;
-    char file_name_buffer[MAX_FILENAME_LENGTH + 1] = "\0";
+    char file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
     int result;
     FILE* chunk_file;
 
-    result = recv(client_socket, header_buffer, HEADER_BUFFER, 0);
+    result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, 0);
     header = (struct message_header*) header_buffer;
     message_header_from_network(header);
     chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
@@ -280,8 +285,8 @@ int send_chunk(int client_socket) {
             STORAGE_DIR, header->filename, chunk_header->timestamp, chunk_header->chunk_num);
     chunk_file = fopen(file_name_buffer, "r");
     if (chunk_file == NULL) {
-        message_header_init((struct message_header*)header_buffer, error);
-        strncpy(header->filename, "failed to open file\n", FILENAME_MAX);
+        message_header_init((struct message_header*)header_buffer, error, 0);
+        strncpy(header->filename, "failed to open chunk file\n", FILENAME_MAX);
         try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
         return FAIL;
     }
@@ -293,16 +298,16 @@ int send_chunk(int client_socket) {
 }
 
 int receive_chunk(int client_socket) {
-    char header_buffer[HEADER_BUFFER + 1] = "\0";
+    char header_buffer[HEADER_BUFFER_SIZE + 1];
     struct message_header* header;
     struct chunk_info* chunk_header;
-    char file_name_buffer[MAX_FILENAME_LENGTH + 1] = "\0";
-    char new_file_name_buffer[MAX_FILENAME_LENGTH + 1] = "\0";
+    char file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
+    char new_file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
     int result;
     struct stat file_as_dir;
     FILE* chunk_file;
 
-    result = recv(client_socket, header_buffer, HEADER_BUFFER, 0);
+    result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, 0);
     header = (struct message_header*) header_buffer;
     message_header_from_network(header);
     chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
@@ -320,7 +325,7 @@ int receive_chunk(int client_socket) {
             STORAGE_DIR, header->filename, chunk_header->timestamp, chunk_header->chunk_num);
     chunk_file = fopen(file_name_buffer, "w");
     if (chunk_file == NULL) {
-        message_header_init((struct message_header*)header_buffer, error);
+        message_header_init((struct message_header*)header_buffer, error, 0);
         strncpy(header->filename, "failed to open file\n", FILENAME_MAX);
         try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
         return FAIL;
@@ -334,7 +339,6 @@ int receive_chunk(int client_socket) {
     sprintf(new_file_name_buffer, "%s/%s/%ld-%d.chunk",
             STORAGE_DIR, header->filename, chunk_header->timestamp, chunk_header->chunk_num);
     result = rename(file_name_buffer, new_file_name_buffer);
-    renameat()
     if (result == 0) {
         return SUCCESS;
     } else {

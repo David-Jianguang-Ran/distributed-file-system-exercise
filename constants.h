@@ -14,6 +14,7 @@
 
 #define SUCCESS 0
 #define FAIL 1
+#define FINISHED 2
 #define ENQUEUE -1
 
 #endif //NS_PA_4_CONSTANTS_H

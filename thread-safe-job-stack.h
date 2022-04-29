@@ -6,8 +6,7 @@
 #define NS_PA_4_THREAD_SAFE_JOB_STACK_H
 
 #include <pthread.h>
-
-#define FINISHED 2
+#include "constants.h"
 
 struct job_stack {
     int* content_base;

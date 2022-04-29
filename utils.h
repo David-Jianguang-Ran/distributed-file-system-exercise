@@ -9,10 +9,28 @@
 #include <time.h>
 
 #include "constants.h"
-#include "message.h"
 #include "chunk-record.h"
 
-size_t HEADER_BUFFER = sizeof(struct message_header) + sizeof(struct chunk_info);
+
+// name query asks for all file names on server
+// name list is a stream of file names as zero terminated strings
+// chunk query asks for all chunk info for a given file name
+// chunk list is a stream of chunk info objects for a given file name
+// when the client send a single item chunk_list it is a request for data of the named chunk
+// chunk data is a single chunk info object followed by a certain bytes of data stated in chunk info
+enum message_type {name_query, name_list, chunk_query, chunk_list, chunk_data, error};
+
+struct message_header {
+    char filename[MAX_FILENAME_LENGTH + 1];
+    enum message_type type;
+    int keep_alive;
+};
+
+void message_header_init(struct message_header* target, enum message_type type, int keep_alive);
+void message_header_set(struct message_header* target, char* filename, enum message_type type, int keep_alive);
+void message_header_from_network(struct message_header* target);
+
+
 
 int send_file_data(struct message_header* header, struct chunk_info* info, int socket_fd, FILE* source);
 // this function expects the headers are NOT in the socket, just data bytes
