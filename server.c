@@ -20,7 +20,6 @@
 char* STORAGE_DIR;
 safe_file_t* STD_OUT;
 int SHOULD_SHUTDOWN;
-size_t HEADER_BUFFER_SIZE = sizeof(struct message_header) + sizeof(struct chunk_info);
 
 void shutdown_signal_handler(int sig_num) {
     SHOULD_SHUTDOWN = 1;
@@ -131,7 +130,9 @@ void* worker_main(void* job_stack_ptr) {
             // receive just the headers
             memset(header_buffer, 0, HEADER_BUFFER_SIZE);
             result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, MSG_PEEK);
-            if (result < (int) sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
+            if (result == 0) {
+                continue;
+            } else if (result < (int) sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
                 job_stack_push_back(job_stack, client_socket);
                 continue;
             }

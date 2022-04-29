@@ -2,16 +2,27 @@
 // Created by dran on 4/23/22.
 //
 
+#include <arpa/inet.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #include "constants.h"
 #include "name-table.h"
 #include "chunk-record.h"
 #include "utils.h"
 
+#define DEBUG 1
+
 // TODO : rework keep connection, centralize control
-size_t HEADER_BUFFER_SIZE = sizeof(struct message_header) + sizeof(struct chunk_info);
+struct addrinfo* server_address[SERVERS];
+
+// this function will populate an array of pointers to addrinfo,one to each server
+int get_server_address();
+// will try to connect to servers and populate sockets to server
+// will set socket to -1 if connection fails, will not affect existing open sockets
+int connect_to_servers(int* sockets_to_server);
 
 int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);
 int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection);
@@ -24,20 +35,156 @@ struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERV
 // query one server for all chunks of a named file, saves to chunk_table
 int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_table* chunk_table);
 
+int main(int argc, char* argv[]) {
+    int i;
+    int result;
+    int has_failed = 0;
 
-int main(int argc, char* argv) {
-    // connect to server
+    // check arguments
+    if (argc < 2) {
+        printf("usage: %s <command> [filename] ...\n", argv[0]);
+        return 1;
+    }
 
-    //
+    // get connections to server
+    int sockets_to_server[SERVERS];
 
-    return 0;
+    result = get_server_address();
+    if (result == FAIL) {
+        printf("failed to get server address info\n");
+        return 1;
+    }
+    for (i = 0; i < SERVERS; i++) {
+        sockets_to_server[i] = -1;
+    }
+    result = connect_to_servers(sockets_to_server);
+
+    // load filenames into name table
+    struct name_table* names;
+    struct table_element* current;
+
+    names = name_table_create();
+    for (i = 2; i < argc; i++) {
+        name_table_add(names, argv[i]);
+    }
+
+    // do work
+    if (matches_command_case_insensitive(argv[1], "list")) {
+        result = list_all_files(sockets_to_server);
+        if (result == FAIL) {
+            has_failed += 1;
+        }
+    } else if (matches_command_case_insensitive(argv[1], "get")) {
+        for (current = names->head; current != NULL; current = current->hh.next) {
+            result = get_file(current->file_name, sockets_to_server, current->hh.next != NULL);
+            if (result == FAIL) {
+                has_failed += 1;
+            }
+        }
+    } else if (matches_command_case_insensitive(argv[1], "put")) {
+        for (current = names->head; current != NULL; current = current->hh.next) {
+            result = put_file(current->file_name, sockets_to_server, current->hh.next != NULL);
+            if (result == FAIL) {
+                has_failed += 1;
+            }
+        }
+    } else {
+        printf("usage: %s <command> [filename] ...\n", argv[0]);
+        has_failed = 1;
+    }
+
+    name_table_free(names);
+    for (i = 0; i < SERVERS; i++) {
+        freeaddrinfo(server_address[i]);
+        if (sockets_to_server[i] != -1) {
+            close(sockets_to_server[i]);
+        }
+    }
+    if (!has_failed) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+int get_server_address() {
+    FILE* config_file;
+    char config_buffer[MAX_FILENAME_LENGTH * 2];
+    char server_name[MAX_FILENAME_LENGTH];
+    char host_name[MAX_FILENAME_LENGTH];
+    char port[16];
+    struct addrinfo server_address_hints;
+    int result;
+    char* read_str;
+    int i;
+
+
+    config_file = fopen(CLIENT_CONFIG_FILE, "r");
+    if (config_file == NULL) {
+        return FAIL;
+    }
+
+    server_address_hints.ai_family = AF_UNSPEC;
+    server_address_hints.ai_socktype = SOCK_STREAM;
+    server_address_hints.ai_flags = AI_PASSIVE;
+    for (i = 0; i < SERVERS; i++) {
+        read_str = fgets(config_buffer, MAX_FILENAME_LENGTH * 2, config_file);
+        if (read_str == NULL) {
+            server_address[i] = NULL;
+        }
+        result = sscanf(config_buffer, "server %s %s:%s\n", server_name, host_name, port);
+        if (result < 3) {
+            server_address[i] = NULL;
+        }
+        result = getaddrinfo(host_name, port, &server_address_hints, server_address + i);
+        if (result != 0) {
+            server_address[i] = NULL;
+        }
+    }
+    fclose(config_file);
+    return SUCCESS;
+}
+
+int connect_to_servers(int* sockets_to_server) {
+    struct timeval timeout;
+    int result;
+    int i;
+
+    if (DEBUG) {
+        printf("trying to connect to servers:\n");
+    }
+    // connect to each server
+    timeout.tv_sec = CLIENT_CONNECT_TIMEOUT;
+    timeout.tv_usec = 0;
+    for (i = 0; i < SERVERS; i++) {
+        if (sockets_to_server[i] != -1) {
+            if (DEBUG) {
+                printf("    server: %d socket:%d <already exist>\n", i, sockets_to_server[i]);
+            }
+            continue;  // connection already exist
+        }
+        sockets_to_server[i] = socket(AF_INET, SOCK_STREAM, 0);
+        // TODO : decide if receive time out of 1 sec is good for normal client operations
+        result = setsockopt(sockets_to_server[i], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
+        result = connect(sockets_to_server[i], server_address[i]->ai_addr, server_address[i]->ai_addrlen);
+        if (result != 0) {
+            close(sockets_to_server[i]);
+            sockets_to_server[i] = -1;
+        }
+        if (DEBUG) {
+            printf("    server: %d socket:%d <new>\n", i, sockets_to_server[i]);
+        }
+    }
+
+
+    return SUCCESS;
 }
 
 int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection) {
     int result;
     int i;
     struct chunk_set* valid_set;
-    char header_buffer[HEADER_BUFFER + 1] = "\0";
+    char header_buffer[HEADER_BUFFER_SIZE + 1] = "\0";
     int header_buffer_tail = 0;
     struct message_header* header;
     struct chunk_info* chunk_info;
@@ -76,9 +223,9 @@ int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
         }
 
         // read response header
-        memset(header_buffer, 0, HEADER_BUFFER);
-        result = recv(sockets_to_server[valid_set->chunks[i].server_num], header_buffer, HEADER_BUFFER, 0);
-        if (result < sizeof(struct message_header)) {
+        memset(header_buffer, 0, HEADER_BUFFER_SIZE);
+        result = recv(sockets_to_server[valid_set->chunks[i].server_num], header_buffer, HEADER_BUFFER_SIZE, 0);
+        if (result < (int)sizeof(struct message_header)) {
             return FAIL;
         }
         message_header_from_network(header);
@@ -112,20 +259,26 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     char file_name_buffer[FILENAME_MAX + 64];
     struct chunk_info chunks_to_send[SERVERS * 2];
     FILE* original;
-    FILE* chunks[SERVERS];
+    FILE* chunk_files[SERVERS];
+    struct message_header header;
 
-    char header_buffer[HEADER_BUFFER + 1] = '\0';
-    struct message_header* header;
+    // try to open file
+    original = fopen(filename, "r");
+    if (original == NULL) {
+        printf("cannot open file %s\n", filename);
+        return FAIL;
+    }
 
     timestamp = make_timestamp();
     map_offset = hash_then_get_remainder(filename);
     chunk_offset = calculate_chunk_length(original) + 1;
+    message_header_set(&header, filename, chunk_data, 1);
 
-    // partition file into chunks
+    // partition file into chunk_files
     for (i = 0; i < SERVERS; i++) {
         sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
-        chunks[i] = fopen(file_name_buffer,"w+");
-        copy_bytes_to_file(original, chunks[i], chunk_offset);
+        chunk_files[i] = fopen(file_name_buffer,"w+");
+        copy_bytes_to_file(original, chunk_files[i], chunk_offset);
     }
 
     // make chunk - server map
@@ -147,11 +300,11 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
             has_failed += 1;
             continue;
         }
-        chunks_to_send[i].length = get_file_length(chunks[chunks_to_send[i].chunk_num]);
-        fseek(chunks[chunks_to_send[i].chunk_num], 0, SEEK_SET);
-        result = send_file_data(header, chunks_to_send[i],
+        chunks_to_send[i].length = get_file_length(chunk_files[chunks_to_send[i].chunk_num]);
+        fseek(chunk_files[chunks_to_send[i].chunk_num], 0, SEEK_SET);
+        result = send_file_data(&header, &chunks_to_send[i],
                                 sockets_to_server[chunks_to_send[i].server_num],
-                                chunks[chunks_to_send[i].chunk_num]);
+                                chunk_files[chunks_to_send[i].chunk_num]);
         if (result == FAIL) {
             has_failed += 1;
         }
@@ -162,7 +315,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 
     // clean up temporary file
     for (i = 0; i < SERVERS; i++) {
-        fclose(chunks[i]);
+        fclose(chunk_files[i]);
         sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
         remove(file_name_buffer);
     }
@@ -184,6 +337,7 @@ int list_all_files(int sockets_to_server[SERVERS]) {
     }
     // query chunk for each name, names without a valid chunk_set means incomplete
     for (current_name = name_table->head; current_name != NULL; current_name = current_name->hh.next) {
+        connect_to_servers(sockets_to_server);
         valid_set = get_valid_chunk_set(current_name->file_name, sockets_to_server, 1);
         if (valid_set == NULL) {
             printf("%s [incomplete]\n", current_name->file_name);
@@ -211,7 +365,7 @@ int query_file_names(int server_socket, struct name_table* name_table) {
     memset(com_buffer, '\0', COM_BUFFER_SIZE + 1);
     // send query to server
     header = (struct message_header*) com_buffer;
-    message_header_set(header, filename, name_query, 1);
+    message_header_set(header, "\0", name_query, 1);
     com_buffer_tail += sizeof(struct message_header);
     result = try_send_in_chunks(server_socket, com_buffer, com_buffer_tail);
     if (result == FAIL) {
@@ -220,7 +374,7 @@ int query_file_names(int server_socket, struct name_table* name_table) {
 
     // parse response, FAIL on malformed, wrong typed message header
     result = recv(server_socket, com_buffer, COM_BUFFER_SIZE, 0);
-    if (result < sizeof(struct message_header)) {
+    if (result < (int)sizeof(struct message_header)) {
         return FAIL;  // TODO : print error here
     }
     message_header_from_network(header);
@@ -267,16 +421,16 @@ struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERV
     // query each server for file chunks
     for (i = 0; i < SERVERS; i++) {
         if (sockets_to_server[i] != -1) {
-            query_chunk_info(sockets_to_server, i, filename, chunk_table);
+            query_chunk_info(sockets_to_server, i, filename, table);
         }
     }
 
-    found_set = find_latest_valid_set(chunk_table);
+    found_set = find_latest_valid_set(table);
     if (found_set != NULL) {  // allocate another heap obj to save the result because chunk_table will be freed soon
-        return_set = malloc(sizeof(chunk_set));
+        return_set = malloc(sizeof(struct chunk_set));
         *return_set = *found_set;
     }
-    chunk_table_free();
+    chunk_table_free(table);
     return return_set;
 }
 
@@ -298,14 +452,14 @@ int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filen
 
     // receive header then receive one chunk_info at a time
     result = recv(sockets_to_server[server_num], com_buffer, sizeof(struct message_header) + sizeof(struct chunk_info), 0);
-    if (result < sizeof(struct message_header)) {
+    if (result < (int) sizeof(struct message_header)) {
         return FAIL;  // TODO : print error here
     }
     message_header_from_network(header);
     if (header->type != chunk_list) {
         return FAIL;
     }
-    found_chunk = (struct chunk_info)com_buffer + sizeof(struct message_header);
+    found_chunk = (struct chunk_info*) (com_buffer + sizeof(struct message_header));
     chunk_info_from_network(found_chunk);
 
     while (found_chunk->chunk_num != -1) {
@@ -313,7 +467,7 @@ int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filen
         chunk_table_add(chunk_table, found_chunk);
 
         result = recv(sockets_to_server[server_num], com_buffer + sizeof (struct message_header), sizeof(struct chunk_info), 0);
-        if (result < sizeof(struct chunk_info)) {
+        if (result < (int) sizeof(struct chunk_info)) {
             return FAIL;
         }
         chunk_info_from_network(found_chunk);

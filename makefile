@@ -13,5 +13,6 @@ tests: directory-structure
 experiments: directory-structure
 	gcc -Wall -o ./executables/hash-modulo-experiment hash-modulo-experiment.c
 
-server: directory-structure
-	gcc -Wextra -pthread -o ./executables/dfs server.c $(modules)
+dfs: directory-structure
+	gcc -Wextra -pthread -g -o ./executables/dfs server.c $(modules)
+	gcc -Wextra -pthread -g -o ./executables/dfc client.c $(modules)
