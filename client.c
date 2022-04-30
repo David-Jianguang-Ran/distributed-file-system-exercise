@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <wordexp.h>
 
 #include "constants.h"
 #include "name-table.h"
@@ -109,6 +110,7 @@ int main(int argc, char* argv[]) {
 
 int get_server_address() {
     FILE* config_file;
+    wordexp_t expanded_path;
     char config_buffer[MAX_FILENAME_LENGTH * 2];
     char server_name[MAX_FILENAME_LENGTH];
     char host_name[MAX_FILENAME_LENGTH];
@@ -118,10 +120,12 @@ int get_server_address() {
     char* read_str;
     int i;
 
-
-    config_file = fopen(CLIENT_CONFIG_FILE, "r");
+    wordexp(CLIENT_CONFIG_FILE, &expanded_path, 0);
+    config_file = fopen(expanded_path.we_wordv[0], "r");
     if (config_file == NULL) {
         return FAIL;
+    } else if (DEBUG) {
+        printf("config file loaded\n");
     }
 
     server_address_hints.ai_family = AF_UNSPEC;
@@ -131,14 +135,21 @@ int get_server_address() {
         read_str = fgets(config_buffer, MAX_FILENAME_LENGTH * 2, config_file);
         if (read_str == NULL) {
             server_address[i] = NULL;
+            continue;
         }
-        result = sscanf(config_buffer, "server %s %s:%s\n", server_name, host_name, port);
+        result = sscanf(config_buffer, "server %s %[^:]:%s\n", server_name, host_name, port);
         if (result < 3) {
             server_address[i] = NULL;
+            continue;
+        } else if (DEBUG) {
+            printf("found config for server: %d at %s:%s\n", i, host_name, port);
         }
         result = getaddrinfo(host_name, port, &server_address_hints, server_address + i);
         if (result != 0) {
             server_address[i] = NULL;
+            if (DEBUG) {
+                printf("    address not found\n");
+            }
         }
     }
     fclose(config_file);
@@ -162,6 +173,11 @@ int connect_to_servers(int* sockets_to_server) {
                 printf("    server: %d socket:%d <already exist>\n", i, sockets_to_server[i]);
             }
             continue;  // connection already exist
+        } else if (server_address[i] == NULL) {
+            if (DEBUG) {
+                printf("    server: %d socket:%d <no addrinfo>\n", i, sockets_to_server[i]);
+            }
+            continue;
         }
         sockets_to_server[i] = socket(AF_INET, SOCK_STREAM, 0);
         // TODO : decide if receive time out of 1 sec is good for normal client operations
