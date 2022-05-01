@@ -14,16 +14,16 @@
 #define DEBUG 1
 
 void message_header_init(struct message_header* target, enum message_type type, int keep_alive) {
+    memset(target, 0, sizeof(struct message_header));
     target->filename[0] = '\0';
     target->type = htons(type);
     target->keep_alive = htons(keep_alive);
 }
 
 void message_header_set(struct message_header* target, char* filename, enum message_type type, int keep_alive) {
+    memset(target, 0, sizeof(struct message_header));
     if (filename != NULL) {
         strncpy(target->filename, filename, MAX_FILENAME_LENGTH);
-    } else {
-        target->filename[0] = '\0';
     }
     target->type = htons(type);
     target->keep_alive = htons(keep_alive);
@@ -42,6 +42,13 @@ int send_file_data(struct message_header* header_arg, struct chunk_info* info_ar
     struct message_header* header;
     struct chunk_info* info;
     int result;
+    int length;
+    int have_sent_file = 0;
+
+    memset(com_buffer, 0, COM_BUFFER_SIZE + 1);
+    // calculate file length
+    fseek(source, 0, SEEK_SET);
+    length = get_file_length(source);
 
     // populate header
     header = (struct message_header*) com_buffer;
@@ -49,29 +56,36 @@ int send_file_data(struct message_header* header_arg, struct chunk_info* info_ar
     com_buffer_tail = sizeof(struct message_header) + sizeof(struct chunk_info);
     *header = *header_arg;
     *info = *info_arg;
-    header->keep_alive = htons(header->keep_alive);
+    info->length = length;
     chunk_info_to_network(info);
 
+    if (DEBUG) {
+        printf("sending file data of %d bytes\n", length);
+    }
     // read some data from file, send when com buffer is filled
     // do until source file is exhausted
-    file_buffer_tail = fread(file_buffer, sizeof(char), COM_BUFFER_SIZE, source);
-    while (file_buffer_tail != 0) {
+
+    while (have_sent_file < length) {
+        file_buffer_tail = fread(file_buffer, sizeof(char), COM_BUFFER_SIZE, source);
         result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
                                           socket_fd,file_buffer, file_buffer_tail);
         if (result == FAIL) {
             return FAIL;
         }
-        file_buffer_tail = fread(file_buffer, sizeof(char), COM_BUFFER_SIZE, source);
+        if (com_buffer_tail != 0) {
+            result = try_send_in_chunks(socket_fd, com_buffer, com_buffer_tail);
+        }
+        if (result == FAIL) {
+            return FAIL;
+        }
+        com_buffer_tail = 0;
+        have_sent_file += file_buffer_tail;
     }
-    result = try_send_in_chunks(socket_fd, com_buffer, com_buffer_tail);
-    if (result == FAIL) {
-        return FAIL;
-    } else {
-        return SUCCESS;
-    }
+    return SUCCESS;
+
 }
 
-int receive_file_data(int socket_fd, FILE* destination, long int length) {
+int receive_file_data(int socket_fd, FILE* destination, int length) {
     char com_buffer[COM_BUFFER_SIZE + 1];
     int com_buffer_tail = 0;
     int result;
@@ -88,9 +102,10 @@ int receive_file_data(int socket_fd, FILE* destination, long int length) {
             com_buffer_tail = result;
         }
         if (DEBUG) {
-            printf("received data bytes:%d\n", result);
+            printf("received data bytes:%d/%d\n", result, length);
         }
         bytes_done += fwrite(com_buffer, sizeof(char ), com_buffer_tail, destination);
+        to_receive = (length - bytes_done) > COM_BUFFER_SIZE ? COM_BUFFER_SIZE : (length - bytes_done);
     }
     return SUCCESS;
 }

@@ -132,7 +132,7 @@ void* worker_main(void* job_stack_ptr) {
             // receive just the headers
             memset(header_buffer, 0, HEADER_BUFFER_SIZE);
             result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, MSG_PEEK);
-            if (result == 0) {
+            if (result < 0) {
                 continue;
             } else if (result < (int) sizeof(struct message_header)) {  // incomplete message, push to bottom of stack for later
                 job_stack_push_back(job_stack, client_socket);
@@ -170,8 +170,8 @@ void* worker_main(void* job_stack_ptr) {
             if (result == FAIL) {
                 sprintf(print_out_buffer, "failed request on socket:%d closing connection\n", client_socket);
                 safe_write(STD_OUT, print_out_buffer);
-                close(client_socket);
-            } else if (header->keep_alive) {
+            }
+            if (header->keep_alive) {
                 job_stack_push_back(job_stack, client_socket);
                 continue;
             } else {
@@ -257,9 +257,11 @@ int handle_chunk_query(int client_socket) {
     found_in_dir = readdir(file_dir);
     while (found_in_dir != NULL) {
         if (found_in_dir->d_type == DT_REG) {  // file storage on disk is structured as: each file is a directory containing chunks with timestamp and chunk number in filename
+            printf("    found chunk file: %s\n", found_in_dir->d_name);
             current_chunk = chunk_info_create();
             result = sscanf(found_in_dir->d_name, "%ld-%d.chunk", &(current_chunk.timestamp), &(current_chunk.chunk_num));
             if (result != 2) {
+                found_in_dir = readdir(file_dir);
                 continue;
             }
             chunk_info_to_network(&current_chunk);
@@ -311,8 +313,6 @@ int send_chunk(int client_socket) {
         try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
         return FAIL;
     }
-    chunk_header->length = get_file_length(chunk_file);
-
     result = send_file_data(header, chunk_header, client_socket, chunk_file);
     fclose(chunk_file);
     return SUCCESS;

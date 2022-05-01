@@ -34,7 +34,7 @@ void message_header_from_network(struct message_header* target);
 
 int send_file_data(struct message_header* header, struct chunk_info* info, int socket_fd, FILE* source);
 // this function expects the headers are NOT in the socket, just data bytes
-int receive_file_data(int socket_fd, FILE* destination, long int length);
+int receive_file_data(int socket_fd, FILE* destination, int length);
 
 // makes a timestamp with millisecond resolution
 long int make_timestamp();

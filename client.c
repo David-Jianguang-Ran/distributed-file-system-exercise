@@ -310,18 +310,12 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 
     // send each partition
     for (i = 0; i < SERVERS * 2; i++) {
-        if (DEBUG) {
-            printf("sending chunk %d, to server %d\n", chunks_to_send[i].chunk_num, chunks_to_send[i].server_num);
-        }
         // some servers may be unavailable
         if (sockets_to_server[chunks_to_send[i].server_num] == -1) {
             // fail but other chunks should still be sent
             has_failed += 1;
             continue;
         }
-        chunks_to_send[i].length = get_file_length(chunk_files[chunks_to_send[i].chunk_num]);
-        fseek(chunk_files[chunks_to_send[i].chunk_num], 0, SEEK_SET);
-
         result = send_file_data(&header, &chunks_to_send[i],
                                 sockets_to_server[chunks_to_send[i].server_num],
                                 chunk_files[chunks_to_send[i].chunk_num]);
