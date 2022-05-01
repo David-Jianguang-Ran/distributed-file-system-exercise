@@ -6,9 +6,11 @@ directory-structure:
 	test -d "./executables/dfs2" || mkdir "./executables/dfs2"
 	test -d "./executables/dfs3" || mkdir "./executables/dfs3"
 	test -d "./executables/dfs4" || mkdir "./executables/dfs4"
+	test -d "./executables/ctmp" || mkdir "./executables/ctmp"
 
 tests: directory-structure
-	gcc -Wall -o ./executables/name-table-test name-table-test.c name-table.c
+	gcc -Wall -g -o ./executables/name-table-test name-table-test.c name-table.c
+	gcc -Wall -g -o ./executables/utils-test utils-test.c utils.c chunk-record.c
 
 experiments: directory-structure
 	gcc -Wall -o ./executables/hash-modulo-experiment hash-modulo-experiment.c

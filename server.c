@@ -17,6 +17,8 @@
 #include "chunk-record.h"
 #include "utils.h"
 
+#define DEBUG 2
+
 char* STORAGE_DIR;
 safe_file_t* STD_OUT;
 int SHOULD_SHUTDOWN;
@@ -136,9 +138,12 @@ void* worker_main(void* job_stack_ptr) {
                 job_stack_push_back(job_stack, client_socket);
                 continue;
             }
+            message_header_from_network(header);
+            sprintf(print_out_buffer, "socket: %d received job type:%d name:%s keep-alive:%d\n",
+                    client_socket, header->type, header->filename, header->keep_alive);
+            safe_write(STD_OUT, print_out_buffer);
 
             // switch to work functions based on header
-            message_header_from_network(header);
             if (header->type == name_query) {
                 result = handle_name_query(client_socket);
             } else if (header->type == chunk_query) {
@@ -157,7 +162,10 @@ void* worker_main(void* job_stack_ptr) {
                 safe_write(STD_OUT, print_out_buffer);
                 close(client_socket);
             }
-
+            if (DEBUG) {
+                sprintf(print_out_buffer, "socket: %d service complete\n", client_socket);
+                safe_write(STD_OUT, print_out_buffer);
+            }
             // after service
             if (result == FAIL) {
                 sprintf(print_out_buffer, "failed request on socket:%d closing connection\n", client_socket);
@@ -171,17 +179,21 @@ void* worker_main(void* job_stack_ptr) {
             }
         }
     }
+    return NULL;
 }
 
 int handle_name_query(int client_socket) {
-    char com_buffer[COM_BUFFER_SIZE] = "\0";
+    char com_buffer[COM_BUFFER_SIZE + 1] = "\0";
     int com_buffer_tail = 0;
     int result;
     struct message_header* header = (struct message_header*)com_buffer;
     DIR* file_storage;
     struct dirent* found_in_dir;
 
-    // no need to recv from client because worker_main have peeked the message already
+    // receive message from client
+    result = recv(client_socket, com_buffer, COM_BUFFER_SIZE, 0);
+
+    // prepare response
     message_header_init(header, name_list, 1);
     com_buffer_tail += sizeof(struct message_header);
 
@@ -195,8 +207,12 @@ int handle_name_query(int client_socket) {
     found_in_dir = readdir(file_storage);
     while (found_in_dir != NULL) {
         if (found_in_dir->d_type == DT_DIR && !matches_command(found_in_dir->d_name, ".")) {  // file storage on disk is structured as: each file is a directory containing chunks with timestamp and chunk number in filename
-                result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
+            result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
                                                   client_socket, found_in_dir->d_name, strlen(found_in_dir->d_name) + 1);  // make sure to copy the \0 into buffer
+
+            if (DEBUG) {
+                printf("found file name %s size: %d\n", found_in_dir->d_name, (int)(strlen(found_in_dir->d_name) + 1));
+            }
         }
         found_in_dir = readdir(file_storage);
     }
@@ -206,7 +222,11 @@ int handle_name_query(int client_socket) {
     result = try_send_in_chunks(client_socket, com_buffer, com_buffer_tail);
 
     closedir(file_storage);
-    return SUCCESS;
+    if (result == SUCCESS) {
+        return SUCCESS;
+    } else {
+        return FAIL;
+    }
 }
 
 int handle_chunk_query(int client_socket) {
@@ -311,7 +331,7 @@ int receive_chunk(int client_socket) {
     result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, 0);
     header = (struct message_header*) header_buffer;
     message_header_from_network(header);
-    chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
+    chunk_header = (struct chunk_info*) (header_buffer + sizeof(struct message_header));
     chunk_info_from_network(chunk_header);
 
     // make sure the file_named directory exists

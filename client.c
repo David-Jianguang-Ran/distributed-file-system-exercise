@@ -8,6 +8,7 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <wordexp.h>
+#include <errno.h>
 
 #include "constants.h"
 #include "name-table.h"
@@ -128,9 +129,10 @@ int get_server_address() {
         printf("config file loaded\n");
     }
 
-    server_address_hints.ai_family = AF_UNSPEC;
+    memset(&server_address_hints, 0, sizeof(struct addrinfo));
+    server_address_hints.ai_family = AF_INET;
     server_address_hints.ai_socktype = SOCK_STREAM;
-    server_address_hints.ai_flags = AI_PASSIVE;
+    server_address_hints.ai_protocol = IPPROTO_TCP;
     for (i = 0; i < SERVERS; i++) {
         read_str = fgets(config_buffer, MAX_FILENAME_LENGTH * 2, config_file);
         if (read_str == NULL) {
@@ -147,9 +149,7 @@ int get_server_address() {
         result = getaddrinfo(host_name, port, &server_address_hints, server_address + i);
         if (result != 0) {
             server_address[i] = NULL;
-            if (DEBUG) {
-                printf("    address not found\n");
-            }
+            printf("    address not found: %s\n", gai_strerror(result));
         }
     }
     fclose(config_file);
@@ -281,7 +281,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     // try to open file
     original = fopen(filename, "r");
     if (original == NULL) {
-        printf("cannot open file %s\n", filename);
+        printf("cannot open file <%s> %s\n", filename, strerror(errno));
         return FAIL;
     }
 
@@ -292,7 +292,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 
     // partition file into chunk_files
     for (i = 0; i < SERVERS; i++) {
-        sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
+        sprintf(file_name_buffer, "./ctmp/tmp-%s-%d", filename, i);
         chunk_files[i] = fopen(file_name_buffer,"w+");
         copy_bytes_to_file(original, chunk_files[i], chunk_offset);
     }
@@ -300,16 +300,19 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     // make chunk - server map
     for (i = 0; i < SERVERS; i++) {
         chunks_to_send[i].server_num = i;
-        chunks_to_send[i].chunk_num = (i - map_offset) % SERVERS;
+        chunks_to_send[i].chunk_num = (i - map_offset + SERVERS) % SERVERS;
         chunks_to_send[i].timestamp = timestamp;
 
         chunks_to_send[i + SERVERS].server_num = i;
-        chunks_to_send[i + SERVERS].chunk_num = (i - map_offset + 1) % SERVERS;
+        chunks_to_send[i + SERVERS].chunk_num = (i - map_offset + 1 + SERVERS) % SERVERS;
         chunks_to_send[i + SERVERS].timestamp = timestamp;
     }
 
     // send each partition
     for (i = 0; i < SERVERS * 2; i++) {
+        if (DEBUG) {
+            printf("sending chunk %d, to server %d\n", chunks_to_send[i].chunk_num, chunks_to_send[i].server_num);
+        }
         // some servers may be unavailable
         if (sockets_to_server[chunks_to_send[i].server_num] == -1) {
             // fail but other chunks should still be sent
@@ -318,11 +321,15 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
         }
         chunks_to_send[i].length = get_file_length(chunk_files[chunks_to_send[i].chunk_num]);
         fseek(chunk_files[chunks_to_send[i].chunk_num], 0, SEEK_SET);
+
         result = send_file_data(&header, &chunks_to_send[i],
                                 sockets_to_server[chunks_to_send[i].server_num],
                                 chunk_files[chunks_to_send[i].chunk_num]);
         if (result == FAIL) {
             has_failed += 1;
+        }
+        if (DEBUG && result == FAIL) {
+            printf("    failed\n");
         }
     }
     if (has_failed) {
@@ -332,7 +339,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     // clean up temporary file
     for (i = 0; i < SERVERS; i++) {
         fclose(chunk_files[i]);
-        sprintf(file_name_buffer, "tmp-%s-%d", filename, i);
+        sprintf(file_name_buffer, "./ctmp/tmp-%s-%d", filename, i);
         remove(file_name_buffer);
     }
 
@@ -399,7 +406,7 @@ int query_file_names(int server_socket, struct name_table* name_table) {
     }
 
     // read name strings and add to name table
-    name_end = com_buffer + sizeof(struct message_header);
+    name_end = com_buffer + sizeof(struct message_header) - 1;
     while (1) {
         name_start = name_end + 1;
         name_end = strchr(name_start, '\0');

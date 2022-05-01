@@ -13,7 +13,7 @@
 #define COM_BUFFER_SIZE 2048
 #define HEADER_BUFFER_SIZE (sizeof(struct message_header) + sizeof(struct chunk_info))
 
-#define CLIENT_CONNECT_TIMEOUT 1
+#define CLIENT_CONNECT_TIMEOUT 100
 #define CLIENT_CONFIG_FILE "~/dfc.conf"
 
 #define SUCCESS 0
