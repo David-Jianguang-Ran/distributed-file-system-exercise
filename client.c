@@ -289,7 +289,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 
     // partition file into chunk_files
     for (i = 0; i < SERVERS; i++) {
-        sprintf(file_name_buffer, "./ctmp/tmp-%s-%d", filename, i);
+        sprintf(file_name_buffer, "./ctmp/%ld-%d", timestamp, i);
         chunk_files[i] = fopen(file_name_buffer,"w+");
         copy_bytes_to_file(original, chunk_files[i], chunk_offset);
     }
@@ -334,7 +334,7 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     // clean up temporary file
     for (i = 0; i < SERVERS; i++) {
         fclose(chunk_files[i]);
-        sprintf(file_name_buffer, "./ctmp/tmp-%s-%d", filename, i);
+        sprintf(file_name_buffer, "./ctmp/%ld-%d", timestamp, i);
         remove(file_name_buffer);
     }
 

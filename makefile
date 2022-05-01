@@ -19,3 +19,18 @@ experiments: directory-structure
 dfs: directory-structure
 	gcc -Wextra -pthread -g -o ./executables/dfs server.c $(modules)
 	gcc -Wextra -pthread -g -o ./executables/dfc client.c $(modules)
+
+stress-test-dirs: directory-structure
+	rm -rf "./stress-test1"
+	mkdir "./stress-test1"
+	mkdir "./stress-test1/ctmp"
+	cp ./test-files/* stress-test1
+	rm -rf "./stress-test2"
+	mkdir "./stress-test2"
+	mkdir "./stress-test2/ctmp"
+	cp ./test-files/* stress-test2
+
+stress-test: stress-test-dirs
+	gcc -Wextra -pthread -g -o ./executables/dfs server.c $(modules)
+	gcc -Wextra -pthread -g -o ./stress-test1/dfc client.c $(modules)
+	gcc -Wextra -pthread -g -o ./stress-test2/dfc client.c $(modules)

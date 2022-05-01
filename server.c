@@ -333,7 +333,7 @@ int receive_chunk(int client_socket) {
     struct message_header* header;
     struct chunk_info* chunk_header;
     char file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
-    char new_file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
+    char new_file_name_buffer[MAX_FILENAME_LENGTH + 256] = "\0";
     int result;
     struct stat file_as_dir;
     FILE* chunk_file;
@@ -348,7 +348,15 @@ int receive_chunk(int client_socket) {
     sprintf(file_name_buffer, "%s/%s", STORAGE_DIR, header->filename);
     result = stat(file_name_buffer, &file_as_dir);
     if (result == -1) {
-        mkdir(file_name_buffer, S_IRWXU);
+        // mkdir(file_name_buffer, S_IRWXU);
+        sprintf(new_file_name_buffer, "mkdir -p %s", file_name_buffer);
+        result = system(new_file_name_buffer);
+        if (result != 0) {
+            message_header_init((struct message_header*)header_buffer, error, 0);
+            strncpy(header->filename, "failed to create file dir\n", FILENAME_MAX);
+            try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
+            return FAIL;
+        }
     }
 
     // open and write data to a temporary file then move to location later to avoid the need to lock file
