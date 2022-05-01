@@ -80,6 +80,9 @@ int send_file_data(struct message_header* header_arg, struct chunk_info* info_ar
         }
         com_buffer_tail = 0;
         have_sent_file += file_buffer_tail;
+        if (DEBUG) {
+            printf("%d/%d\n",have_sent_file, length);
+        }
     }
     return SUCCESS;
 
@@ -101,10 +104,10 @@ int receive_file_data(int socket_fd, FILE* destination, int length) {
         } else {
             com_buffer_tail = result;
         }
-        if (DEBUG) {
-            printf("received data bytes:%d/%d\n", result, length);
-        }
         bytes_done += fwrite(com_buffer, sizeof(char ), com_buffer_tail, destination);
+        if (DEBUG) {
+            printf("received data bytes:%d/%d\n", bytes_done, length);
+        }
         to_receive = (length - bytes_done) > COM_BUFFER_SIZE ? COM_BUFFER_SIZE : (length - bytes_done);
     }
     return SUCCESS;
@@ -191,6 +194,7 @@ int copy_into_buffer_or_send(char* buffer, int* buffer_tail, int buffer_max,
             // time copy partially then send
             current_batch_size = (buffer_max - *buffer_tail);
             memcpy(buffer + *buffer_tail, to_copy + have_done, current_batch_size);
+            *buffer_tail += current_batch_size;
             result = try_send_in_chunks(socket_fd, buffer, *buffer_tail);
             if (result == FAIL) {
                 return FAIL;
@@ -249,7 +253,7 @@ int try_send_in_chunks(int socket_fd, char* buffer, int length) {
         ret_status = send(socket_fd, buffer + bytes_sent, length - bytes_sent, MSG_NOSIGNAL);
         if (ret_status == -1) {
             return FAIL;
-        } else if (DEBUG) {
+        } else if (0) {
             printf("sent:%d bytes\n", ret_status);
         }
         bytes_sent += ret_status;

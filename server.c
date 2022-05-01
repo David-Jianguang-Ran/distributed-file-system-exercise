@@ -65,6 +65,8 @@ int main(int argc, char* argv[]) {
         printf("error: unable to create socket\n");
         return 1;
     }
+
+    memset(&server_sock, 0, sizeof(struct sockaddr_in));
     server_sock.sin_family = AF_INET;
     server_sock.sin_addr.s_addr = htonl(INADDR_ANY);
     server_sock.sin_port = htons(atoi(argv[2]));

@@ -316,6 +316,10 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
             has_failed += 1;
             continue;
         }
+        if (DEBUG) {
+            // TODO : server number should start at 1 here
+            printf("sending chunk %d to server %d\n", chunks_to_send[i].chunk_num, chunks_to_send[i].server_num);
+        }
         result = send_file_data(&header, &chunks_to_send[i],
                                 sockets_to_server[chunks_to_send[i].server_num],
                                 chunk_files[chunks_to_send[i].chunk_num]);
