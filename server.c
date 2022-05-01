@@ -29,10 +29,8 @@ void shutdown_signal_handler(int sig_num) {
 
 void* worker_main(void* job_stack);
 
-// TODO : decide whether to close socket when encountering error
 int handle_name_query(int client_socket);
 int handle_chunk_query(int client_socket);
-
 // must peak and make sure there is a valid message and chunk header in socket before calling the following functions
 int receive_chunk(int client_socket);
 int send_chunk(int client_socket);
@@ -141,8 +139,8 @@ void* worker_main(void* job_stack_ptr) {
                 continue;
             }
             message_header_from_network(header);
-            sprintf(print_out_buffer, "socket: %d received job type:%d name:%s keep-alive:%d\n",
-                    client_socket, header->type, header->filename, header->keep_alive);
+            sprintf(print_out_buffer, "<%s> socket: %d received job type:%d name:%s keep-alive:%d\n",
+                    STORAGE_DIR, client_socket, header->type, header->filename, header->keep_alive);
             safe_write(STD_OUT, print_out_buffer);
 
             // switch to work functions based on header
@@ -160,7 +158,7 @@ void* worker_main(void* job_stack_ptr) {
                 result = receive_chunk(client_socket);
             } else {
                 // ?? how did we get here?
-                sprintf(print_out_buffer, "invalid header received on socket:%d closing connection\n", client_socket);
+                sprintf(print_out_buffer, "<%s> invalid header received on socket:%d closing connection\n", STORAGE_DIR, client_socket);
                 safe_write(STD_OUT, print_out_buffer);
                 close(client_socket);
             }
@@ -170,7 +168,7 @@ void* worker_main(void* job_stack_ptr) {
             }
             // after service
             if (result == FAIL) {
-                sprintf(print_out_buffer, "failed request on socket:%d\n", client_socket);
+                sprintf(print_out_buffer, "<%s> failed request on socket:%d\n",STORAGE_DIR, client_socket);
                 safe_write(STD_OUT, print_out_buffer);
             }
             if (header->keep_alive) {

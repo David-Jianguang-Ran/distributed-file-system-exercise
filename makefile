@@ -6,7 +6,6 @@ directory-structure:
 	test -d "./executables/dfs2" || mkdir "./executables/dfs2"
 	test -d "./executables/dfs3" || mkdir "./executables/dfs3"
 	test -d "./executables/dfs4" || mkdir "./executables/dfs4"
-	test -d "./executables/ctmp" || mkdir "./executables/ctmp"
 
 tests: directory-structure
 	gcc -Wall -g -o ./executables/name-table-test name-table-test.c name-table.c
@@ -23,11 +22,9 @@ final: directory-structure
 stress-test-dirs: directory-structure
 	rm -rf "./stress-test1"
 	mkdir "./stress-test1"
-	mkdir "./stress-test1/ctmp"
 	cp ./test-files/* stress-test1
 	rm -rf "./stress-test2"
 	mkdir "./stress-test2"
-	mkdir "./stress-test2/ctmp"
 	cp ./test-files/* stress-test2
 
 stress-test: stress-test-dirs
