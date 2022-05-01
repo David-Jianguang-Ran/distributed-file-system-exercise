@@ -16,7 +16,7 @@ experiments: directory-structure
 	gcc -Wall -o ./executables/hash-modulo-experiment hash-modulo-experiment.c
 	gcc -Wall -o ./executables/config-read-scan-experiment config-read-scan-experiment.c
 
-dfs: directory-structure
+final: directory-structure
 	gcc -Wextra -pthread -g -o ./executables/dfs server.c $(modules)
 	gcc -Wextra -pthread -g -o ./executables/dfc client.c $(modules)
 

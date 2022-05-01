@@ -280,6 +280,9 @@ int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
     if (original == NULL) {
         printf("cannot open file <%s> %s\n", filename, strerror(errno));
         return FAIL;
+    } else if (get_file_length(original) < 4) {
+        printf("put failed file <%s> is too small (less than 4 bytes)\n", filename);
+        return FAIL;
     }
 
     timestamp = make_timestamp();

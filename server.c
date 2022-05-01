@@ -170,7 +170,7 @@ void* worker_main(void* job_stack_ptr) {
             }
             // after service
             if (result == FAIL) {
-                sprintf(print_out_buffer, "failed request on socket:%d closing connection\n", client_socket);
+                sprintf(print_out_buffer, "failed request on socket:%d\n", client_socket);
                 safe_write(STD_OUT, print_out_buffer);
             }
             if (header->keep_alive) {
