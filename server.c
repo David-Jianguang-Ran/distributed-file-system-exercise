@@ -303,8 +303,6 @@ int send_chunk(int client_socket) {
     chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
     chunk_info_from_network(chunk_header);
 
-    // TODO : should i check if server num is wrong?
-
     // open chunk file
     sprintf(file_name_buffer, "%s/%s/%ld-%d.chunk",
             STORAGE_DIR, header->filename, chunk_header->timestamp, chunk_header->chunk_num);
@@ -315,6 +313,7 @@ int send_chunk(int client_socket) {
         try_send_in_chunks(client_socket, header_buffer, sizeof(struct message_header));
         return FAIL;
     }
+    header->type = htons(chunk_data);
     result = send_file_data(header, chunk_header, client_socket, chunk_file);
     fclose(chunk_file);
     return SUCCESS;
