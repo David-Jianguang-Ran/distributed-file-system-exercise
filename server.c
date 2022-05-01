@@ -354,7 +354,7 @@ int receive_chunk(int client_socket) {
     }
 
     // write data to file
-    result = receive_file_data(client_socket, chunk_file, chunk_header->length);
+    result = receive_file_data(client_socket, chunk_file, atoi(chunk_header->length_str));
 
     // move file to actual location after
     fclose(chunk_file);

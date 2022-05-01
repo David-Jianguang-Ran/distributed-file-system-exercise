@@ -56,7 +56,7 @@ int send_file_data(struct message_header* header_arg, struct chunk_info* info_ar
     com_buffer_tail = sizeof(struct message_header) + sizeof(struct chunk_info);
     *header = *header_arg;
     *info = *info_arg;
-    info->length = length;
+    chunk_info_set_length(info, length);
     chunk_info_to_network(info);
 
     if (DEBUG) {

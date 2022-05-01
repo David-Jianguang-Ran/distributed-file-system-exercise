@@ -251,7 +251,7 @@ int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
         chunk_info_from_network(chunk_info);
 
         // receive file body, not header
-        result = receive_file_data(sockets_to_server[valid_set->chunks[i].server_num], local, chunk_info->length);
+        result = receive_file_data(sockets_to_server[valid_set->chunks[i].server_num], local, atoi(chunk_info->length_str));
 
         if (result == FAIL) {
             printf("%s [failed to receive chunk data from server]\n", filename);

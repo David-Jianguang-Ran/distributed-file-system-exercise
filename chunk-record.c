@@ -2,6 +2,7 @@
 // Created by dran on 4/23/22.
 //
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 
@@ -13,7 +14,7 @@ struct chunk_info chunk_info_create() {
     created.server_num = -1;
     created.timestamp = -1;
     created.chunk_num = -1;
-    created.length = -1;
+    created.length_str[0] = '\0';
     return created;
 }
 
@@ -21,14 +22,18 @@ void chunk_info_to_network(struct chunk_info* target) {
     target->server_num = htons(target->server_num);
     target->timestamp = htonl(target->timestamp);
     target->chunk_num = htons(target->chunk_num);
-    target->length = htons(target->length);
+//    target->length = htons(target->length);
 }
 
 void chunk_info_from_network(struct chunk_info* target) {
     target->server_num = ntohs(target->server_num);
     target->timestamp = ntohl(target->timestamp);
     target->chunk_num = ntohs(target->chunk_num);
-    target->length = ntohs(target->length);
+//    target->length = ntohs(target->length);
+}
+
+void chunk_info_set_length(struct chunk_info* target, int length) {
+    sprintf(target->length_str, "%d", length);
 }
 
 struct chunk_table* chunk_table_create() {

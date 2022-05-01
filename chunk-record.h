@@ -12,7 +12,7 @@ struct chunk_info {
     int server_num;
     long int timestamp;
     int chunk_num;
-    int length;  // this field may not be populated
+    char length_str[16];  // this field may not be populated
 };
 
 // a set of 4 valid chunks belonging to the same file and same version
@@ -33,6 +33,7 @@ struct chunk_info chunk_info_create();
 // the following functions convert to and from network byte order
 void chunk_info_to_network(struct chunk_info* target);
 void chunk_info_from_network(struct chunk_info* target);
+void chunk_info_set_length(struct chunk_info* target, int length);
 
 struct chunk_table* chunk_table_create();
 void chunk_table_free(struct chunk_table* table);
