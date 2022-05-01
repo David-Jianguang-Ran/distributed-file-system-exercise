@@ -15,7 +15,7 @@
 #include "chunk-record.h"
 #include "utils.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 // TODO : rework keep connection, centralize control
 struct addrinfo* server_address[SERVERS];
@@ -73,9 +73,6 @@ int main(int argc, char* argv[]) {
     // do work
     if (matches_command_case_insensitive(argv[1], "list")) {
         result = list_all_files(sockets_to_server);
-        if (result == FAIL) {
-            has_failed += 1;
-        }
     } else if (matches_command_case_insensitive(argv[1], "get")) {
         for (current = names->head; current != NULL; current = current->hh.next) {
             result = get_file(current->file_name, sockets_to_server, current->hh.next != NULL);

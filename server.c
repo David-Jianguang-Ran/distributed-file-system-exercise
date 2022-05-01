@@ -17,7 +17,7 @@
 #include "chunk-record.h"
 #include "utils.h"
 
-#define DEBUG 2
+#define DEBUG 0
 
 char* STORAGE_DIR;
 safe_file_t* STD_OUT;

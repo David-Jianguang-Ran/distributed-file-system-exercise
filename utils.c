@@ -11,7 +11,7 @@
 #include "utils.h"
 #include "chunk-record.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 void message_header_init(struct message_header* target, enum message_type type, int keep_alive) {
     memset(target, 0, sizeof(struct message_header));
