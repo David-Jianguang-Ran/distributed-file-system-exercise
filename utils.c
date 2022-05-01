@@ -116,7 +116,7 @@ int receive_file_data(int socket_fd, FILE* destination, int length) {
 long int make_timestamp() {
     struct timeval now;
     gettimeofday(&now, NULL);
-    return  (long int) now.tv_sec * 1000000 + (long int) now.tv_usec;
+    return  (long int) now.tv_sec * 10000 + (long int) now.tv_usec / 100;
 }
 
 int calculate_chunk_length(FILE* original) {

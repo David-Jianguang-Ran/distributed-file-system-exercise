@@ -232,49 +232,58 @@ int handle_name_query(int client_socket) {
 }
 
 int handle_chunk_query(int client_socket) {
-    char com_buffer[COM_BUFFER_SIZE] = "\0";
-    int com_buffer_tail = 0;
-    struct message_header* header;
-    struct chunk_info current_chunk;
-    char file_name_buffer[MAX_FILENAME_LENGTH + 64] = "\0";
     int result;
+
+    char com_buffer[COM_BUFFER_SIZE+ 1];
+    int com_buffer_tail = 0;
+    struct message_header* header = (struct message_header*) com_buffer;
+    struct chunk_info* chunk_info = (struct chunk_info*) com_buffer + sizeof(struct message_header);
+    struct chunk_info current_chunk;
+
+    char file_name[MAX_FILENAME_LENGTH + 64];
     DIR* file_dir;
     struct dirent* found_in_dir;
 
-    result = recv(client_socket, com_buffer, COM_BUFFER_SIZE, 0);
-    com_buffer_tail = result;
-    header = (struct message_header*) com_buffer;
+    memset(com_buffer, 0, COM_BUFFER_SIZE + 1);
+    memset(file_name, 0, MAX_FILENAME_LENGTH + 64);
 
+    // receive request
+    result = recv(client_socket, com_buffer, sizeof(struct message_header), 0);
+    com_buffer_tail = result;
+
+    // open directory containing chunks
     // open directory containing file chunks
-    sprintf(file_name_buffer, "%s/%s", STORAGE_DIR, header->filename);
-    file_dir = opendir(file_name_buffer);
+    sprintf(file_name, "%s/%s", STORAGE_DIR, header->filename);
+    file_dir = opendir(file_name);
     if (file_dir == NULL) {
         message_header_init(header, error, 0);
         strcpy(header->filename, "failed to open file dir\n");
-        try_send_in_chunks(client_socket, com_buffer, sizeof(struct message_header));
+        try_send_in_chunks(client_socket, com_buffer, sizeof( struct message_header));
         return FAIL;
     }
+    header->type = htons(chunk_list);
 
-    // read directory for valid chunks, copy into buffer and send
+    // read directory contents and send
     found_in_dir = readdir(file_dir);
     while (found_in_dir != NULL) {
-        if (found_in_dir->d_type == DT_REG) {  // file storage on disk is structured as: each file is a directory containing chunks with timestamp and chunk number in filename
+        current_chunk = chunk_info_create();
+        result = sscanf(found_in_dir->d_name, "%ld-%d.chunk", &(current_chunk.timestamp), &(current_chunk.chunk_num));
+        if (result != 2) {  // temp chunks or just other files
+            found_in_dir = readdir(file_dir);
+            continue;
+        }
+        if (DEBUG) {
             printf("    found chunk file: %s\n", found_in_dir->d_name);
-            current_chunk = chunk_info_create();
-            result = sscanf(found_in_dir->d_name, "%ld-%d.chunk", &(current_chunk.timestamp), &(current_chunk.chunk_num));
-            if (result != 2) {
-                found_in_dir = readdir(file_dir);
-                continue;
-            }
-            chunk_info_to_network(&current_chunk);
-            result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
-                                              client_socket, &current_chunk,sizeof(struct chunk_info));
-            if (result == FAIL) {
-                return FAIL;
-            }
+        }
+        chunk_info_to_network(&current_chunk);
+        result = copy_into_buffer_or_send(com_buffer, &com_buffer_tail, COM_BUFFER_SIZE,
+                                          client_socket, &current_chunk,sizeof(struct chunk_info));
+        if (result == FAIL) {
+            return FAIL;
         }
         found_in_dir = readdir(file_dir);
     }
+
     // send empty chunk info as a signal for finished
     current_chunk = chunk_info_create();
     chunk_info_to_network(&current_chunk);
@@ -300,7 +309,7 @@ int send_chunk(int client_socket) {
     result = recv(client_socket, header_buffer, HEADER_BUFFER_SIZE, 0);
     header = (struct message_header*) header_buffer;
     message_header_from_network(header);
-    chunk_header = (struct chunk_info*) header_buffer + sizeof(struct message_header);
+    chunk_header = (struct chunk_info*) (header_buffer + sizeof(struct message_header));
     chunk_info_from_network(chunk_header);
 
     // open chunk file

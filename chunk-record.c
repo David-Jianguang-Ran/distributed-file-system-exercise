@@ -65,6 +65,7 @@ int chunk_table_add(struct chunk_table* table, struct chunk_info* to_add) {
         for (i = 0; i < SERVERS; i++) {
             found->chunks[i] = chunk_info_create();
         }
+        found->timestamp = to_add->timestamp;
         HASH_ADD_INT(table->head, timestamp, found);
     }
 

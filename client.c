@@ -225,7 +225,7 @@ int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
         // build and send request to server for chunk[i]
         header = (struct message_header*) header_buffer;
         message_header_set(header, filename, chunk_list, 1);
-        chunk_info = (struct chunk_info*) header_buffer + sizeof(struct message_header);
+        chunk_info = (struct chunk_info*) (header_buffer + sizeof(struct message_header));
         *chunk_info = valid_set->chunks[i];
         chunk_info_to_network(chunk_info);
         header_buffer_tail = sizeof(struct message_header) + sizeof(struct chunk_info);
@@ -266,12 +266,12 @@ int get_file(char* filename, int sockets_to_server[SERVERS], int keep_connection
 }
 
 int put_file(char* filename, int sockets_to_server[SERVERS], int keep_connection) {
-    int has_failed;
-    int i;
-    int result;
-    int map_offset;
-    int chunk_offset;
-    long int timestamp;
+    int has_failed = 0;
+    int i = 0;
+    int result = 0;
+    int map_offset = 0;
+    int chunk_offset = 0;
+    long int timestamp = 0;
     char file_name_buffer[FILENAME_MAX + 64];
     struct chunk_info chunks_to_send[SERVERS * 2];
     FILE* original;
@@ -456,38 +456,42 @@ struct chunk_set* get_valid_chunk_set(char* filename, int sockets_to_server[SERV
 }
 
 int query_chunk_info(int sockets_to_server[SERVERS], int server_num, char* filename, struct chunk_table* chunk_table) {
-    char com_buffer[sizeof(struct message_header) + sizeof(struct chunk_info) + 1] = "\0";
-    int com_buffer_tail = 0;
+    char header_buffer[HEADER_BUFFER_SIZE+ 1];
+    int header_buffer_tail = 0;
     struct message_header* header;
     struct chunk_info* found_chunk;
     int result;
 
     // send query to server
-    header = (struct message_header*) com_buffer;
+    memset(header_buffer, 0, HEADER_BUFFER_SIZE + 1);
+    header = (struct message_header*) header_buffer;
     message_header_set(header, filename, chunk_query, 1);
-    com_buffer_tail += sizeof(struct message_header);
-    result = try_send_in_chunks(sockets_to_server[server_num], com_buffer, com_buffer_tail);
+    header_buffer_tail += sizeof(struct message_header);
+    result = try_send_in_chunks(sockets_to_server[server_num], header_buffer, header_buffer_tail);
     if (result == FAIL) {
         return FAIL;
     }
 
     // receive header then receive one chunk_info at a time
-    result = recv(sockets_to_server[server_num], com_buffer, sizeof(struct message_header) + sizeof(struct chunk_info), 0);
-    if (result < (int) sizeof(struct message_header)) {
+    result = recv(sockets_to_server[server_num], header_buffer, HEADER_BUFFER_SIZE, 0);
+    if (result < (int) HEADER_BUFFER_SIZE) {
         return FAIL;  // TODO : print error here
     }
     message_header_from_network(header);
     if (header->type != chunk_list) {
         return FAIL;
     }
-    found_chunk = (struct chunk_info*) (com_buffer + sizeof(struct message_header));
+    found_chunk = (struct chunk_info*) (header_buffer + sizeof(struct message_header));
     chunk_info_from_network(found_chunk);
 
-    while (found_chunk->chunk_num != -1) {
+    while (found_chunk->chunk_num != -1 && found_chunk->chunk_num != 65535) {
         found_chunk->server_num = server_num;
+        if (DEBUG) {
+            printf("found timestamp:%ld chunk:%d server:%d\n", found_chunk->timestamp, found_chunk->chunk_num, found_chunk->server_num);
+        }
         chunk_table_add(chunk_table, found_chunk);
 
-        result = recv(sockets_to_server[server_num], com_buffer + sizeof (struct message_header), sizeof(struct chunk_info), 0);
+        result = recv(sockets_to_server[server_num], header_buffer + sizeof (struct message_header), sizeof(struct chunk_info), 0);
         if (result < (int) sizeof(struct chunk_info)) {
             return FAIL;
         }
