@@ -1,4 +1,16 @@
-# PA4 - Distributed File System
+# Programming Assignment 4 - Distributed File System
+
+#### What is this?
+This is a distributed file system consisting of a client and server program.  
+This is built using C socket and pthread library.  
+This program is purely an academic exercise. 
+
+#### What does it do?
+The server programs take arguments: `<storage-directory> <port#>`  
+The client supports following actions:  
+- `put <file-names> ... ` will attempt to store named files on the servers.  
+- `get <file-names> ... ` will attempt to retrieve named files
+- `list` will print out files stored on the servers.  
 
 #### What's all in here?
 - A client and a server program that will send files over TCP.
@@ -12,4 +24,3 @@ Default client name is `./executables/dfc`, server is `./executables/dfs`.
 
 
 Created by David Ran May/2022.  
-No license do what ever the hell you want, just don't get me involved, at all. 
